@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+# arquivo gerado pelo teste de paridade
+tests/mcp_tools.txt
+# credencial nunca entra no git (vive fora do repo, mas por garantia)
+credentials.json
+.env
+.DS_Store

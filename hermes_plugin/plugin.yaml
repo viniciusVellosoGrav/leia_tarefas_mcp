@@ -1,0 +1,25 @@
+name: leia-tarefas
+version: 1.0.0
+description: "Quadro \"Tarefas Leia\" (CRM do ambiente grav) no chat: listar minhas pendentes e em andamento, sem responsável, quadro por fase/responsável, busca, card inteiro (descrição, tipo, prioridade, cliente, checklist), iniciar, concluir, mover de fase, criar card, arquivar, editar checklist/descrição/título, Membros e comentários. Mesmo catálogo do modo servidor MCP (repositório leia-tarefas)."
+author: Hermes Agent + Vinícius
+kind: standalone
+provides_tools:
+  - leia_tarefas_minhas_pendentes
+  - leia_tarefas_minhas_fazendo
+  - leia_tarefas_sem_responsavel
+  - leia_tarefas_listar
+  - leia_tarefas_buscar
+  - leia_tarefas_card
+  - leia_tarefas_iniciar
+  - leia_tarefas_concluir
+  - leia_tarefas_mover_fase
+  - leia_tarefas_arquivar
+  - leia_tarefas_checklist
+  - leia_tarefas_editar_descricao
+  - leia_tarefas_renomear
+  - leia_tarefas_me_adicionar
+  - leia_tarefas_me_remover
+  - leia_tarefas_criar_card
+  - leia_tarefas_comentarios
+  - leia_tarefas_comentar
+  - leia_tarefas_excluir_comentario
