@@ -71,7 +71,7 @@ def _schema_de(fn) -> dict:
             'parameters': {'type': 'object', 'properties': props, 'required': obrigatorios}}
 
 
-def _handler(fn, aceitos: tuple):
+def _handler(fn, aceitos: tuple, obrigatorios: tuple = ()):
     """Fecho que adapta a assinatura tipada ao contrato do dispatcher do Hermes.
 
     O registry chama `handler(args, **kw)` com o dicionário de argumentos como
@@ -79,8 +79,13 @@ def _handler(fn, aceitos: tuple):
     """
     def chamar(args=None, **_kw):
         dados = args if isinstance(args, dict) else {}
+        limpos = {k: v for k, v in dados.items() if k in aceitos}
+        faltando = [n for n in obrigatorios if n not in limpos or limpos[n] in (None, '')]
+        if faltando:
+            return tool_error('Faltou informar: %s. Chame de novo com esse(s) campo(s).'
+                              % ', '.join(faltando))
         try:
-            return tool_result(fn(**{k: v for k, v in dados.items() if k in aceitos}))
+            return tool_result(fn(**limpos))
         except crm.LeiaError as exc:
             return tool_error(str(exc))
         except Exception as exc:
@@ -94,10 +99,12 @@ def register(ctx) -> None:
     """Registra no chat as ferramentas do catálogo compartilhado."""
     for item in ferramentas.CATALOGO:
         fn = item['funcao']
+        parametros = inspect.signature(fn).parameters
         ctx.register_tool(
             name='leia_tarefas_' + fn.__name__,
             toolset=TOOLSET,
-            handler=_handler(fn, tuple(inspect.signature(fn).parameters)),
+            handler=_handler(fn, tuple(parametros),
+                             tuple(n for n, p in parametros.items() if p.default is inspect.Parameter.empty)),
             emoji=item['emoji'],
             description=item['curta'],
             schema=_schema_de(fn),

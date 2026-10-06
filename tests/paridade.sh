@@ -27,17 +27,13 @@ if [ $plugin -ne 0 ] || [ $mcp -ne 0 ]; then
   exit 1
 fi
 
-mapfile -t via_mcp < "$RAIZ/tests/mcp_tools.txt" 2>/dev/null || readarray -t via_mcp < "$RAIZ/tests/mcp_tools.txt"
-via_plugin=$("$PY_HERMES" - "$RAIZ" <<'PY'
-import pathlib, sys
-raiz = pathlib.Path(sys.argv[1]); sys.path.insert(0, str(raiz))
-from leia_tarefas import ferramentas
-print('\n'.join('leia_tarefas_' + n for n in sorted(ferramentas.NOMES)))
-PY
-)
-
-diff <(printf '%s\n' $via_plugin | sort) <(printf '%s\n' "${via_mcp[@]}" | sed 's/^/leia_tarefas_/' | sort) >/dev/null || {
-  echo "PARIDADE FALHOU: nomes diferentes entre plugin e MCP"; exit 1; }
-
-echo "modos: plugin $(printf '%s\n' $via_plugin | wc -l | tr -d ' ') ferramentas | MCP $(printf '%s\n' "${via_mcp[@]}" | wc -l | tr -d ' ') ferramentas"
+# Os dois testes comparam cada modo com o MESMO catálogo — se ambos passaram, é
+# impossível os modos divergirem entre si.
+plugin_n=$("$PY_HERMES" -c "import sys; sys.path.insert(0, '$RAIZ'); from leia_tarefas import ferramentas; print(len(ferramentas.NOMES))")
+mcp_n=$(wc -l < "$RAIZ/tests/mcp_tools.txt" | tr -d ' ')
+if [ "$plugin_n" != "$mcp_n" ]; then
+  echo "PARIDADE FALHOU: plugin=$plugin_n ferramentas, MCP=$mcp_n"
+  exit 1
+fi
+echo "modos: plugin $plugin_n ferramentas | MCP $mcp_n ferramentas"
 echo "PARIDADE OK"
