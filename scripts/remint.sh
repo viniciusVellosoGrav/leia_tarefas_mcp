@@ -7,8 +7,8 @@
 # servidor MCP). Use quando o cliente reclamar de token vencido (máquina parada
 # por mais de 30 dias).
 #
-# Os dois watchdogs (cron do Hermes e launchd do Claude) podem chamar isto quase
-# ao mesmo tempo; a trava abaixo evita duas emissões concorrentes.
+# O watchdog (cron do Hermes) chama isto; a trava abaixo evita que duas execuções
+# sobrepostas emitam dois tokens.
 set -euo pipefail
 
 HOST=ubuntu@54.91.22.152

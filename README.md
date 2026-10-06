@@ -77,10 +77,12 @@ Uma só, compartilhada pelos dois modos:
 vencido (máquina parada > 30 dias), `bash scripts/remint.sh` emite de novo direto
 na máquina do LEIA, via ssh.
 
-Dois watchdogs chamam isso — o cron do Hermes (`leia_tarefas_renova.sh`, segunda
-8h, avisa no chat) e o launchd `digital.grav.leia-tarefas-renova`. `remint.sh`
-tem trava (lock em `$TMPDIR`) para duas execuções simultâneas não emitirem dois
-tokens. Silêncio dos dois = está tudo bem.
+**Um watchdog** chama isso: o cron do Hermes (`leia_tarefas_renova.sh`, segunda
+8h), que avisa no chat quando falha — silêncio dele = está tudo bem. O agendador
+do launchd (`digital.grav.leia-tarefas-renova`) foi descartado: um só, de
+propósito, para não haver dois lugares para manter (e um deles envelhecer).
+`remint.sh` tem trava (lock em `$TMPDIR`) para duas execuções sobrepostas não
+emitirem dois tokens.
 
 ## Verificar
 
