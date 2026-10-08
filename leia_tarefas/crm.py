@@ -52,7 +52,7 @@ PHASE_IDS = {
 }
 PHASE_BY_ID = {v: k for k, v in PHASE_IDS.items()}
 DONE, DOING = 'Feito', 'Fazendo'
-BACKLOG = 'Backlog'
+BACKLOG, A_FAZER = 'Backlog', 'A Fazer'
 # Fila de trabalho de verdade: Backlog (não refinado) e Feito ficam de fora.
 ATIVAS = ('A Fazer', 'Com Impedimento', 'Fazendo', 'Aguardando Aprovação')
 TIMEOUT = 25

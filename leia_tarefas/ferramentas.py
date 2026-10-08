@@ -304,11 +304,11 @@ def _campo_id(nome: str) -> str:
 
 
 def criar_card(titulo: str, descricao: str | None = None, tipo: str | None = None,
-               fase: str = crm.BACKLOG) -> dict:
-    """Cria um card no quadro. Nasce sem Membros (disponível) e, por padrão, em Backlog — onde o
-    time recebe pedido cru. Título descritivo e autocontido; a descrição (markdown) guarda as
-    palavras do usuário. `tipo` (Feature, Bug, Investigacao) só quando for óbvio.
-    Confere lendo o card de volta do servidor."""
+               fase: str = crm.A_FAZER) -> dict:
+    """Cria um card no quadro. Nasce sem Membros (disponível) e em "A Fazer" — a fila de trabalho
+    de verdade; Backlog só se pedido, e nunca por padrão. Título descritivo e autocontido; a
+    descrição (markdown) guarda as palavras do usuário. `tipo` (Feature, Bug, Investigacao) só
+    quando for óbvio. Confere lendo o card de volta do servidor."""
     if fase not in crm.PHASE_IDS:
         raise crm.LeiaError(f'Fase inválida: {fase}. Válidas: {", ".join(crm.PHASE_ORDER)}')
     if tipo and tipo not in TIPOS:
@@ -398,7 +398,7 @@ CATALOGO: list[dict] = [
     {'funcao': renomear, 'emoji': '🏷️', 'curta': 'Trocar o título de um card meu'},
     {'funcao': me_adicionar, 'emoji': '🙋', 'curta': 'Me pôr em Membros de um card do quadro'},
     {'funcao': me_remover, 'emoji': '🚪', 'curta': 'Me tirar de Membros de um card do quadro'},
-    {'funcao': criar_card, 'emoji': '🆕', 'curta': 'Criar card no quadro (nasce em Backlog, sem membros)'},
+    {'funcao': criar_card, 'emoji': '🆕', 'curta': 'Criar card no quadro (nasce em A Fazer, sem membros)'},
     {'funcao': comentarios, 'emoji': '💬', 'curta': 'Comentários recentes de um card'},
     {'funcao': comentar, 'emoji': '📝', 'curta': 'Comentar em um card do quadro'},
     {'funcao': excluir_comentario, 'emoji': '❌', 'curta': 'Excluir um comentário meu (lixeira do CRM)'},

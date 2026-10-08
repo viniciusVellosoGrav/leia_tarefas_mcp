@@ -44,7 +44,8 @@ Regras do quadro:
   substitui tudo: parta da descrição atual de `card` e confirme com o usuário antes.
   Gravam só por atualização parcial (PATCH); se o backend não tiver a rota, avisam e não gravam.
 - Título: `renomear` troca só o título de um card atribuído a quem pergunta.
-- Card novo nasce em Backlog, sem Membros; título descritivo e autocontido.
+- Card novo nasce em "A Fazer" (a fila de trabalho), sem Membros; título descritivo e
+  autocontido. Nunca criar em Backlog por padrão — só se o usuário pedir Backlog.
 - Membros: `me_adicionar` / `me_remover` põem ou tiram SÓ quem pergunta do campo "Membros",
   em qualquer card do quadro, sem mexer nos outros membros nem na fase. Não há ferramenta para
   atribuir outra pessoa, de propósito. Para pegar um card: `me_adicionar` e depois `iniciar`.
