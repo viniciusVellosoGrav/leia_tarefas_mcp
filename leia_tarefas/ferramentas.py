@@ -97,10 +97,10 @@ def _falha(erro: object):
 
 
 def _exigir_meu(card: dict) -> None:
-    """Só mexe em card atribuído ao dono do token."""
+    """Só mexe em card cujo **Responsável** é o dono do token."""
     if crm.me()['nome'] not in card['responsaveis']:
         raise crm.LeiaError(
-            f'"{card["titulo"]}" não está atribuído a você — responsáveis: '
+            f'"{card["titulo"]}" não está com você como Responsável — responsável atual: '
             f'{", ".join(card["responsaveis"]) or "ninguém"}. Não mexi no card.'
         )
 
@@ -119,26 +119,30 @@ def _mover(tarefa: str, fase: str) -> dict:
 
 
 def minhas_pendentes(limite: int = 40) -> dict:
-    """Tarefas atribuídas a mim já na fila de trabalho — A Fazer, Com Impedimento, Fazendo e
-    Aguardando Aprovação. Backlog fica de fora (não refinado) e Feito também (acabou)."""
+    """Tarefas em que EU sou o Responsável, já na fila de trabalho — A Fazer, Com Impedimento,
+    Fazendo e Aguardando Aprovação. Backlog fica de fora (não refinado) e Feito também (acabou).
+    Ser só participante não conta."""
     return _lista('eu', None, limite)
 
 
 def minhas_fazendo(limite: int = 40) -> dict:
-    """Tarefas atribuídas a mim que estão na fase Fazendo."""
+    """Tarefas em que EU sou o Responsável e que estão na fase Fazendo. Ser só participante não
+    conta."""
     return _lista('eu', crm.DOING, limite)
 
 
 def sem_responsavel(limite: int = 40) -> dict:
-    """Tarefas da coluna A Fazer sem nenhum responsável — refinadas e disponíveis para pegar.
+    """Tarefas da coluna A Fazer SEM Responsável — refinadas e disponíveis para pegar. É o mesmo
+    "sem responsável" que o app mostra no card: participante e o campo antigo "Membros" não contam.
     Backlog fica de fora de propósito."""
     return _lista('ninguem', 'A Fazer', limite)
 
 
 def listar(fase: str | None = None, responsavel: str | None = None,
            incluir_backlog_e_feito: bool = False, limite: int = 60) -> dict:
-    """Quadro inteiro filtrado por fase e/ou responsável (trecho do nome, ex. "Enzo").
-    Sem fase, traz só as fases ativas, a não ser que incluir_backlog_e_feito=true."""
+    """Quadro inteiro filtrado por fase e/ou responsável (trecho do nome, ex. "Enzo"; é o
+    Responsável do card — participante não conta). Sem fase, traz só as fases ativas, a não ser que
+    incluir_backlog_e_feito=true."""
     if fase and fase not in crm.PHASE_IDS:
         raise crm.LeiaError(f'Fase inválida: {fase}. Válidas: {", ".join(crm.PHASE_ORDER)}')
     todos = crm._todo_o_quadro()
@@ -253,32 +257,47 @@ def renomear(tarefa: str, titulo: str) -> dict:
     return {'card': {'id': resumo['id'], 'titulo_anterior': resumo['titulo']}, 'titulo': salvo}
 
 
-def _membro(tarefa: str, dentro: bool) -> dict:
+def _responsavel(tarefa: str, assumir: bool) -> dict:
     card, erro = _resolver(tarefa)
     if card is None:
         return _falha(erro)
     eu = crm.me()
-    ids = crm.definir_membro(card['id'], eu['id'], dentro)
+    anterior = list(card['responsaveis'])
+    if not assumir and not anterior:
+        return {'card': {'id': card['id'], 'titulo': card['titulo'], 'fase': card['fase']},
+                'responsavel': None, 'nota': 'o card já estava sem Responsável: nada mudou.'}
+    if not assumir:
+        _exigir_meu(card)          # tirar o responsável de outra pessoa não é por aqui
+    ids = crm.definir_responsavel(card['id'], eu['id'] if assumir else None)
     saida = {'card': {'id': card['id'], 'titulo': card['titulo'], 'fase': card['fase']},
-             'membros': list(crm.nomes(ids).values())}
-    if not dentro:
+             'responsavel': list(crm.nomes(ids).values()) or None}
+    if assumir and anterior and eu['nome'] not in anterior:
+        saida['nota'] = 'o Responsável era %s e passou a ser você.' % ', '.join(anterior)
+    elif assumir and anterior:
+        saida['nota'] = 'o Responsável já era você: nada mudou.'
+    elif assumir:
+        saida['nota'] = 'o card não tinha Responsável; agora é você.'
+    if not assumir:
         rec = crm.registro(card['id'])
         if eu['id'] in [p.get('userId') for p in rec.get('participants') or []]:
-            saida['nota'] = ('saí de Membros, mas continuo como participante do registro — '
-                             'por isso o card ainda conta como meu.')
+            saida['nota'] = ('você continua como participante do registro — mas participante não '
+                             'conta como responsável: no app o card aparece sem dono.')
+        else:
+            saida['nota'] = 'no app o card passa a aparecer sem responsável.'
     return saida
 
 
 def me_adicionar(tarefa: str) -> dict:
-    """Me coloca no campo "Membros" de um card do quadro (passa a ser meu, junto com quem já
-    estiver). Não tira ninguém e não muda a fase. `tarefa` = id ou trecho do título."""
-    return _membro(tarefa, True)
+    """Me define como **Responsável** do card (o campo que o app mostra). Se já houver outra pessoa
+    como responsável, ela é transferida para mim — a nota diz de quem era. Não muda a fase.
+    `tarefa` = id ou trecho do título."""
+    return _responsavel(tarefa, True)
 
 
 def me_remover(tarefa: str) -> dict:
-    """Me tira do campo "Membros" de um card do quadro; os outros membros ficam. Não muda a fase.
-    `tarefa` = id ou trecho do título."""
-    return _membro(tarefa, False)
+    """Tiro eu do **Responsável** (o card fica sem dono no app). Só funciona se o responsável
+    atual sou eu; não muda a fase. `tarefa` = id ou trecho do título."""
+    return _responsavel(tarefa, False)
 
 
 def _itens(resposta) -> list[dict]:
@@ -305,7 +324,7 @@ def _campo_id(nome: str) -> str:
 
 def criar_card(titulo: str, descricao: str | None = None, tipo: str | None = None,
                fase: str = crm.A_FAZER) -> dict:
-    """Cria um card no quadro. Nasce sem Membros (disponível) e em "A Fazer" — a fila de trabalho
+    """Cria um card no quadro. Nasce sem Responsável (disponível) e em "A Fazer" — a fila de trabalho
     de verdade; Backlog só se pedido, e nunca por padrão. Título descritivo e autocontido; a
     descrição (markdown) guarda as palavras do usuário. `tipo` (Feature, Bug, Investigacao) só
     quando for óbvio. Confere lendo o card de volta do servidor."""
@@ -383,9 +402,9 @@ def excluir_comentario(tarefa: str, comentario_id: str) -> dict:
 # JSON Schema vem dos tipos da assinatura. Os dois adaptadores leem daqui.
 
 CATALOGO: list[dict] = [
-    {'funcao': minhas_pendentes, 'emoji': '📋', 'curta': 'Tarefas pendentes atribuídas a mim no quadro Tarefas Leia'},
-    {'funcao': minhas_fazendo, 'emoji': '🚧', 'curta': 'Tarefas em andamento (fase Fazendo) atribuídas a mim'},
-    {'funcao': sem_responsavel, 'emoji': '🫥', 'curta': 'Tarefas pendentes sem ninguém atribuído'},
+    {'funcao': minhas_pendentes, 'emoji': '📋', 'curta': 'Tarefas pendentes comigo como Responsável (quadro Tarefas Leia)'},
+    {'funcao': minhas_fazendo, 'emoji': '🚧', 'curta': 'Tarefas em andamento (fase Fazendo) comigo como Responsável'},
+    {'funcao': sem_responsavel, 'emoji': '🫥', 'curta': 'Tarefas pendentes sem Responsável (ninguém atribuído)'},
     {'funcao': listar, 'emoji': '🗂️', 'curta': 'Quadro Tarefas Leia por fase e/ou responsável'},
     {'funcao': buscar, 'emoji': '🔎', 'curta': 'Buscar card no quadro Tarefas Leia pelo título'},
     {'funcao': card, 'emoji': '📄', 'curta': 'Ler um card inteiro: descrição, tipo, prioridade, cliente, checklist'},
@@ -396,9 +415,9 @@ CATALOGO: list[dict] = [
     {'funcao': checklist, 'emoji': '☑️', 'curta': 'Editar o checklist de um card meu (marcar, adicionar, remover, renomear)'},
     {'funcao': editar_descricao, 'emoji': '✏️', 'curta': 'Substituir a descrição de um card meu'},
     {'funcao': renomear, 'emoji': '🏷️', 'curta': 'Trocar o título de um card meu'},
-    {'funcao': me_adicionar, 'emoji': '🙋', 'curta': 'Me pôr em Membros de um card do quadro'},
-    {'funcao': me_remover, 'emoji': '🚪', 'curta': 'Me tirar de Membros de um card do quadro'},
-    {'funcao': criar_card, 'emoji': '🆕', 'curta': 'Criar card no quadro (nasce em A Fazer, sem membros)'},
+    {'funcao': me_adicionar, 'emoji': '🙋', 'curta': 'Me definir como Responsável de um card do quadro'},
+    {'funcao': me_remover, 'emoji': '🚪', 'curta': 'Me tirar do Responsável (o card fica sem dono)'},
+    {'funcao': criar_card, 'emoji': '🆕', 'curta': 'Criar card no quadro (nasce em A Fazer, sem responsável)'},
     {'funcao': comentarios, 'emoji': '💬', 'curta': 'Comentários recentes de um card'},
     {'funcao': comentar, 'emoji': '📝', 'curta': 'Comentar em um card do quadro'},
     {'funcao': excluir_comentario, 'emoji': '❌', 'curta': 'Excluir um comentário meu (lixeira do CRM)'},

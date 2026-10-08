@@ -22,9 +22,10 @@ Regras do quadro:
 - Backlog não é fila de trabalho (não refinado, ninguém inicia ali). "Pendente" =
   A Fazer, Com Impedimento, Fazendo, Aguardando Aprovação.
 - "Sem ninguém atribuído" é a coluna A Fazer, não o quadro inteiro.
-- Quem cuida do card é o campo "Membros" (+ participantes), não o dono do registro.
-- Mudança de fase só em card atribuído a quem pergunta; a ferramenta recusa com o
-  motivo. Não contorne.
+- Quem cuida do card é o campo nativo "Responsável" (o que o app mostra no card);
+  ser participante não conta. Campo antigo "Membros" não é mais fonte de nada.
+- Mudança de fase só em card com quem pergunta como Responsável; a ferramenta recusa
+  com o motivo. Não contorne.
 - O objeto também tem o quadro "Tarefas NEP"; estas ferramentas só falam do
   "Tarefas Leia" e recusam card do NEP.
 - Arquivar = mandar para a lixeira do CRM (some do quadro; só admin do CRM restaura).
@@ -44,10 +45,11 @@ Regras do quadro:
   substitui tudo: parta da descrição atual de `card` e confirme com o usuário antes.
   Gravam só por atualização parcial (PATCH); se o backend não tiver a rota, avisam e não gravam.
 - Título: `renomear` troca só o título de um card atribuído a quem pergunta.
-- Card novo nasce em "A Fazer" (a fila de trabalho), sem Membros; título descritivo e
+- Card novo nasce em "A Fazer" (a fila de trabalho), sem Responsável; título descritivo e
   autocontido. Nunca criar em Backlog por padrão — só se o usuário pedir Backlog.
-- Membros: `me_adicionar` / `me_remover` põem ou tiram SÓ quem pergunta do campo "Membros",
-  em qualquer card do quadro, sem mexer nos outros membros nem na fase. Não há ferramenta para
+- Responsável: `me_adicionar` define QUEM PERGUNTA como Responsável do card (se havia outra
+  pessoa, ela é transferida — a nota diz de quem era) e `me_remover` tira (o card fica sem
+  dono). Valem em qualquer card do quadro e não mexem na fase. Não há ferramenta para
   atribuir outra pessoa, de propósito. Para pegar um card: `me_adicionar` e depois `iniciar`.
 """
 

@@ -11,8 +11,13 @@ Regras do quadro que este módulo assume (apuradas no ambiente em 24/09/2026):
   objeto — "Tarefas NEP" — é outro quadro e fica de fora).
 - Seis fases, nesta ordem: Backlog, A Fazer, Com Impedimento, Fazendo,
   Aguardando Aprovação, Feito. "Pendente" = qualquer fase menos Feito.
-- Quem cuida do card é o campo customizado "Membros"; "sem ninguém atribuído"
-  = sem "Membros" e sem participantes.
+- Quem cuida do card é o campo nativo **Responsável** (`ownerId`) — é o campo que
+  o app desenha no card e o que os relatórios chamam de "Sem responsável".
+  Participante não conta para isso.
+  (Revisado em 08/10/2026: até então o quadro era lido pelo campo customizado
+  "Membros" + participantes. O campo "Membros" saiu da definição do objeto e o
+  app mostra só o Responsável — card sem ele aparece sem dono no app. Os valores
+  antigos de "Membros" continuam nos registros: ver `FIELD_MEMBROS_LEGADO`.)
 
 A credencial vive em `~/.config/leia-tarefas-mcp/credentials.json` e o token é
 renovado sozinho quando está perto de vencer (mesma rota que o emitiu).
@@ -35,7 +40,8 @@ CRED_PATH = os.path.expanduser(os.environ.get('LEIA_TAREFAS_CRED', '~/.config/le
 OBJECT_KEY = 'leia_tasks'
 RECORD_TYPE = 'Tarefas Leia'
 RECORD_TYPE_ID = '6a4bc681a25728ec19100475'  # "Tarefas Leia"
-FIELD_MEMBROS = '6a4bc701a25728ec19100489'
+FIELD_MEMBROS_LEGADO = '6a4bc701a25728ec19100489'  # campo que saiu da definição do objeto: só valor velho nos registros
+FIELD_RESPONSAVEL = 'std:owner'                     # rótulo "Responsável"; o valor é o `ownerId` do registro
 FIELD_DESCRICAO = '6a4b0267a25728ec19100274'
 FIELD_CLIENTE = '6a748c8fcb09e9df2123b34d'
 FIELD_TIPO = '6a763b3b1750de2274368ab4'
@@ -218,20 +224,29 @@ def nomes(ids: list[str]) -> dict[str, str]:
 # ── cards ─────────────────────────────────────────────────────────────────────
 
 
-def _membros(rec: dict) -> list[str]:
+def _membros_legado(rec: dict) -> list[str]:
+    """Valores que sobraram no campo "Membros" (saiu da definição do objeto).
+
+    Não é mais fonte de nada: existe só para o card poder avisar que tem dado
+    antigo ali. Quem conta como dono do card é o Responsável nativo.
+    """
     for cf in rec.get('customFields') or []:
-        if cf.get('fieldId') == FIELD_MEMBROS:
+        if cf.get('fieldId') == FIELD_MEMBROS_LEGADO:
             v = cf.get('value')
             return [x for x in (v if isinstance(v, list) else [v]) if x]
     return []
 
 
 def _responsaveis(rec: dict) -> list[str]:
-    ids = list(_membros(rec))
-    for p in rec.get('participants') or []:
-        if p.get('userId') and p['userId'] not in ids:
-            ids.append(p['userId'])
-    return ids
+    """Quem cuida do card: o **Responsável** nativo (`ownerId`), só ele.
+
+    É o campo que o app mostra no card e o que os relatórios chamam de "sem
+    responsável". Participante não conta — contar participante (e o campo
+    "Membros") foi o que fez a ferramenta dizer, até 08/10/2026, que um card sem
+    dono tinha dono.
+    """
+    dono = rec.get('ownerId')
+    return [dono] if dono else []
 
 
 def _quando(iso: str | None) -> datetime | None:
@@ -300,16 +315,21 @@ def _pagina(cred: dict, n: int, extras: dict | None = None) -> list[dict]:
 
 
 def _minha_lista() -> list[dict]:
-    """Cards do quadro em que eu sou responsável: uma consulta, com cache."""
+    """Cards do quadro em que eu sou o **Responsável**: uma consulta, com cache.
+
+    O filtro vai no servidor (`owner`), e o resultado é conferido aqui: servidor
+    que ainda não conheça o parâmetro o ignora e devolveria o quadro inteiro — e
+    filtrar por participante, que era o que se fazia, trazia card de outra pessoa.
+    """
     cacheado = _cache_get('meus')
     if cacheado is not None:
         return cacheado  # type: ignore[return-value]
     cred = credentials()
-    filtro = json.dumps({FIELD_MEMBROS: cred.get('userId')})
+    eu = cred.get('userId')
     items, pagina = [], 1
     while True:
-        lote = _pagina(cred, pagina, {'customFields': filtro})
-        items += lote
+        lote = _pagina(cred, pagina, {'owner': eu})
+        items += [r for r in lote if r.get('ownerId') == eu]
         if len(lote) < PAGE_SIZE:
             break
         pagina += 1
@@ -479,12 +499,12 @@ def _detalhe(rec: dict) -> dict:
     """O card inteiro: resumo + descrição, tipo, prioridade, cliente, checklist."""
     meta = campos_meta()
     valores = {cf['fieldId']: cf.get('value') for cf in (rec.get('customFields') or []) if cf.get('fieldId')}
-    gente = list(_responsaveis(rec)) + [rec.get('ownerId')] + [p.get('userId') for p in rec.get('participants') or []]
+    gente = list(_responsaveis(rec)) + [p.get('userId') for p in rec.get('participants') or []] + _membros_legado(rec)
     mapa = nomes(gente)
     ids_cli = valores.get(FIELD_CLIENTE) or []
     mapa_cli = clientes(ids_cli if isinstance(ids_cli, list) else [ids_cli])
 
-    usados = {FIELD_DESCRICAO, FIELD_MEMBROS, FIELD_CLIENTE, FIELD_CHECKLIST, FIELD_TIPO, FIELD_PRIORIDADE}
+    usados = {FIELD_DESCRICAO, FIELD_MEMBROS_LEGADO, FIELD_CLIENTE, FIELD_CHECKLIST, FIELD_TIPO, FIELD_PRIORIDADE}
     detalhe = _resumo(rec, mapa)
     detalhe.update({
         'tipo': _render(FIELD_TIPO, valores.get(FIELD_TIPO), meta, mapa, mapa_cli) if valores.get(FIELD_TIPO) else None,
@@ -500,6 +520,14 @@ def _detalhe(rec: dict) -> dict:
             if f not in usados and not f.startswith('std:') and v not in (None, '', [], {}, False)
         } or None,
     })
+    # Card sem Responsável que ainda carrega dado velho de dono (campo "Membros"
+    # e/ou participantes) some como "atribuído" para quem lê participante como
+    # dono, mas aparece SEM dono no app. O aviso evita essa leitura errada.
+    orfaos = _membros_legado(rec) + [p.get('userId') for p in rec.get('participants') or [] if p.get('userId')]
+    if not rec.get('ownerId') and orfaos:
+        detalhe['aviso'] = ('Sem Responsável — no app o card aparece sem dono. O que existe aqui é '
+                            'o campo antigo "Membros" e/ou Participantes (%s), que não contam como '
+                            'responsável.' % ', '.join(mapa.get(i, i) for i in dict.fromkeys(orfaos)))
     return detalhe
 
 
@@ -661,16 +689,22 @@ def renomear(card_id: str, titulo: str) -> str | None:
     return registro(card_id).get('title')
 
 
-def definir_membro(card_id: str, user_id: str, dentro: bool) -> list[str]:
-    """Põe ou tira uma pessoa do campo "Membros" (PATCH só desse campo, lido agora) e devolve
-    os ids dos Membros como ficaram, relidos. Já estando como pedido, não grava nada."""
-    atuais = _membros(registro(card_id))
-    novo = [m for m in atuais if m != user_id] + ([user_id] if dentro else [])
-    if dentro and user_id in atuais:
-        novo = atuais
-    if novo != atuais:
-        patch_campos(card_id, [{'fieldId': FIELD_MEMBROS, 'value': novo}])
-    return _membros(registro(card_id))
+def definir_responsavel(card_id: str, user_id: str | None) -> list[str]:
+    """Define o Responsável do card (`user_id=None` remove) e devolve quem ficou, relido.
+
+    Grava pela rota própria do responsável — `PUT /crm/records/<objeto>/<id>/owner`
+    com `{"newOwnerId": <id|null>}` —, a mesma que o app usa. PATCH de campo
+    customizado não serve: o app desenha o Responsável nativo, não um campo
+    qualquer (foi assim que o campo "Membros" virou escrita invisível).
+    Já estando como pedido, não grava nada.
+    """
+    atual = registro(card_id).get('ownerId')
+    if (atual or None) == (user_id or None):
+        return _responsaveis(registro(card_id))
+    api('/crm/records/%s/%s/owner' % (OBJECT_KEY, card_id),
+        method='PUT', body={'newOwnerId': user_id})
+    _cache_limpa()
+    return _responsaveis(registro(card_id))
 
 
 # ── comentários ───────────────────────────────────────────────────────────────
