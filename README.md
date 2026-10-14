@@ -24,7 +24,7 @@ hermes_plugin/
 scripts/
   remint.sh                   reemite o token na máquina do LEIA (ssh), com trava
   renova.sh                   watchdog do token (silencioso quando está tudo bem)
-  mint_remoto.py              emissor que roda no servidor
+  mint_remoto.mjs             emissor que roda no container do backend (Mongo + JWT)
 tests/
   test_paridade.py            plugin do Hermes == catálogo
   test_mcp_stdio.py           servidor MCP (subido de verdade) == catálogo
@@ -75,7 +75,7 @@ Uma só, compartilhada pelos dois modos:
 `~/.config/leia-tarefas-mcp/credentials.json` (600), com override por
 `LEIA_TAREFAS_CRED`. O cliente renova sozinho quando faltam menos de 5 dias;
 vencido (máquina parada > 30 dias), `bash scripts/remint.sh` emite de novo direto
-na máquina do LEIA, via ssh.
+na máquina do LEIA, via ssh (dentro do container `leia-app`).
 
 **Um watchdog** chama isso: o cron do Hermes (`leia_tarefas_renova.sh`, segunda
 8h), que avisa no chat quando falha — silêncio dele = está tudo bem. O agendador
