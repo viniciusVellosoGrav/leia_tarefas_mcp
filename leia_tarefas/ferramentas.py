@@ -60,7 +60,10 @@ def _agrupar(consulta: str, cards: list[dict], limite: int) -> dict:
 
 
 def _lista(quem: str, fase: str | None, limite: int) -> dict:
-    cards = crm.cards_de(quem)
+    """Lista do recorte. A FASE vai na consulta (o servidor filtra pelo índice de
+    fase); sem fase pedida, o recorte são as fases de trabalho."""
+    fases: list[str] = [fase] if fase else list(crm.ATIVAS)
+    cards = crm.cards_de(quem, fases)
     base = 'minhas tarefas' if quem == 'eu' else 'tarefas sem nenhum responsável'
     if fase:
         return _agrupar('%s em %s' % (base, fase), [c for c in cards if c['fase'] == fase], limite)
@@ -131,6 +134,14 @@ def minhas_fazendo(limite: int = 40) -> dict:
     return _lista('eu', crm.DOING, limite)
 
 
+def minhas_na_fase(fase: str, limite: int = 40) -> dict:
+    """Minhas tarefas NUMA fase do quadro — A Fazer, Com Impedimento, Fazendo, Aguardando
+    Aprovação, Backlog ou Feito. A fase é filtrada NO SERVIDOR (o recorte entra pelo índice de
+    fase), então a consulta traz só os cards daquela fase em vez de baixar o quadro inteiro.
+    Responsável sou eu; ser só participante não conta."""
+    return _lista('eu', fase, limite)
+
+
 def sem_responsavel(limite: int = 40) -> dict:
     """Tarefas da coluna A Fazer SEM Responsável — refinadas e disponíveis para pegar. É o mesmo
     "sem responsável" que o app mostra no card: participante e o campo antigo "Membros" não contam.
@@ -145,7 +156,8 @@ def listar(fase: str | None = None, responsavel: str | None = None,
     incluir_backlog_e_feito=true."""
     if fase and fase not in crm.PHASE_IDS:
         raise crm.LeiaError(f'Fase inválida: {fase}. Válidas: {", ".join(crm.PHASE_ORDER)}')
-    todos = crm._todo_o_quadro()
+    fases: list[str] | None = [fase] if fase else (None if incluir_backlog_e_feito else list(crm.ATIVAS))
+    todos = crm._todo_o_quadro(fases)
     mapa = crm.nomes([i for c in todos for i in crm._responsaveis(c)])
     cards = [crm._resumo(c, mapa) for c in todos]
     if fase:
@@ -404,6 +416,7 @@ def excluir_comentario(tarefa: str, comentario_id: str) -> dict:
 CATALOGO: list[dict] = [
     {'funcao': minhas_pendentes, 'emoji': '📋', 'curta': 'Tarefas pendentes comigo como Responsável (quadro Tarefas Leia)'},
     {'funcao': minhas_fazendo, 'emoji': '🚧', 'curta': 'Tarefas em andamento (fase Fazendo) comigo como Responsável'},
+    {'funcao': minhas_na_fase, 'emoji': '🎯', 'curta': 'Minhas tarefas numa fase do quadro (a fase é filtrada no servidor)'},
     {'funcao': sem_responsavel, 'emoji': '🫥', 'curta': 'Tarefas pendentes sem Responsável (ninguém atribuído)'},
     {'funcao': listar, 'emoji': '🗂️', 'curta': 'Quadro Tarefas Leia por fase e/ou responsável'},
     {'funcao': buscar, 'emoji': '🔎', 'curta': 'Buscar card no quadro Tarefas Leia pelo título'},

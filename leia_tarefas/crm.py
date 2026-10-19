@@ -25,6 +25,7 @@ renovado sozinho quando está perto de vencer (mesma rota que o emitiu).
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -139,13 +140,15 @@ def credentials(renew_if_expiring: bool = True) -> dict:
 
 
 def _renew(cred: dict) -> dict:
-    req = urllib.request.Request(
-        cred['baseUrl'].rstrip('/') + '/mcp/token', data=b'{}',
-        headers={'api-key': cred['apiKey'], 'auth': cred['token'], 'content-type': 'application/json'},
-        method='POST',
+    status, _, texto = _http(
+        'POST',
+        cred['baseUrl'].rstrip('/') + '/mcp/token',
+        {'api-key': cred['apiKey'], 'auth': cred['token'], 'content-type': 'application/json'},
+        corpo={},
     )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-        novo = json.loads(r.read().decode() or '{}')
+    if status >= 400:
+        raise LeiaError(f'Renovação do token respondeu {status}')
+    novo = json.loads(texto or '{}')
     if not novo.get('token'):
         raise LeiaError('Renovação não devolveu token')
     cred = {**cred, 'token': novo['token']}
@@ -156,6 +159,21 @@ def _renew(cred: dict) -> dict:
 
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
+#
+# A conexão é REUSADA (`keep-alive`). Cada requisição nova pagava TCP + TLS até a
+# máquina do LEIA — ~0,48 s medidos de us-east-1 para o Brasil, mais que qualquer
+# consulta do servidor (7–20 ms) ou do banco (2–5 ms). Com a conexão viva, o que
+# sobra por requisição é uma ida e volta (~0,15 s).
+#
+# O pool existe porque o quadro é lido em paralelo (5 páginas por vez): guardar
+# uma conexão só transformaria o paralelismo em fila. Conexão ociosa é
+# reaproveitada; se falhar (servidor fechou do outro lado), é descartada e a
+# requisição repetida numa conexão nova — só em GET, que é o que não repete
+# efeito. Escrita com conexão morta falha e o erro chega ao usuário.
+
+_pool: dict[str, list] = {}          # origem ("https://host") -> conexões ociosas
+_pool_lock = threading.Lock()
+POOL_MAX = 6
 
 
 def _headers(cred: dict, com_corpo: bool = False) -> dict:
@@ -165,31 +183,76 @@ def _headers(cred: dict, com_corpo: bool = False) -> dict:
     return h
 
 
+def _pegar_conexao(origem: str):
+    """Conexão ociosa daquela origem, ou uma nova (TCP + TLS na primeira vez)."""
+    with _pool_lock:
+        livres = _pool.get(origem)
+        if livres:
+            return livres.pop()
+    partes = urllib.parse.urlsplit(origem)
+    classe = http.client.HTTPSConnection if partes.scheme == 'https' else http.client.HTTPConnection
+    return classe(partes.netloc, timeout=TIMEOUT)
+
+
+def _devolver_conexao(origem: str, con, viva: bool = True) -> None:
+    if con is None:
+        return
+    if viva:
+        with _pool_lock:
+            livres = _pool.setdefault(origem, [])
+            if len(livres) < POOL_MAX:
+                livres.append(con)
+                return
+    try:
+        con.close()
+    except Exception:
+        pass
+
+
+def _http(method: str, url: str, headers: dict, corpo=None, tentativas: int = 2):
+    """Uma requisição HTTP reusando conexão. Devolve (status, headers, texto).
+
+    GET é repetido uma vez quando a conexão ociosa estava morta; os demais
+    métodos vão numa tentativa só (repetir escrita pode aplicar duas vezes).
+    """
+    partes = urllib.parse.urlsplit(url)
+    origem = '%s://%s' % (partes.scheme, partes.netloc)
+    alvo = partes.path + (('?' + partes.query) if partes.query else '')
+    dados = json.dumps(corpo).encode() if corpo is not None else None
+    total = tentativas if method.upper() in ('GET', 'HEAD') else 1
+    for tentativa in range(1, total + 1):
+        con = _pegar_conexao(origem)
+        try:
+            con.request(method, alvo, body=dados, headers=headers)
+            resposta = con.getresponse()
+            texto = resposta.read().decode(errors='replace')
+            status, cabecalhos = resposta.status, dict(resposta.getheaders())
+            _devolver_conexao(origem, con)
+            return status, cabecalhos, texto
+        except (http.client.HTTPException, OSError) as exc:
+            _devolver_conexao(origem, con, viva=False)
+            if tentativa == total:
+                raise LeiaError(f'CRM inalcançável: {exc}') from exc
+    raise LeiaError('CRM inalcançável: requisição não completada')
+
+
 def api(path: str, params: dict | None = None, method: str = 'GET', body: dict | None = None):
     cred = credentials()
     url = cred['baseUrl'].rstrip('/') + path
     if params:
         url += '?' + urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, '')})
-    req = urllib.request.Request(
-        url, data=json.dumps(body).encode() if body is not None else None,
-        headers=_headers(cred, com_corpo=body is not None), method=method,
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            return json.loads(r.read().decode() or '{}')
-    except urllib.error.HTTPError as exc:
-        corpo = exc.read().decode(errors='replace')
+    status, _, texto = _http(method, url, _headers(cred, com_corpo=body is not None), corpo=body)
+    if status >= 400:
         try:
-            msg = json.loads(corpo).get('message') or corpo
+            msg = json.loads(texto).get('message') or texto
         except Exception:
-            msg = corpo or f'HTTP {exc.code}'
-        if exc.code == 401:
-            raise LeiaError(f'Sem autorização no CRM ({exc.code}): {msg}') from exc
-        if exc.code == 403:
-            raise LeiaError(f'Sem permissão no CRM ({exc.code}): {msg}') from exc
-        raise LeiaError(f'CRM respondeu {exc.code}: {msg[:300]}') from exc
-    except urllib.error.URLError as exc:
-        raise LeiaError(f'CRM inalcançável: {exc.reason}') from exc
+            msg = texto or f'HTTP {status}'
+        if status == 401:
+            raise LeiaError(f'Sem autorização no CRM ({status}): {msg}')
+        if status == 403:
+            raise LeiaError(f'Sem permissão no CRM ({status}): {msg}')
+        raise LeiaError(f'CRM respondeu {status}: {msg[:300]}')
+    return json.loads(texto or '{}')
 
 
 def me() -> dict:
@@ -308,65 +371,103 @@ def _resumo(rec: dict, mapa: dict[str, str]) -> dict:
 
 
 def _pagina(cred: dict, n: int, extras: dict | None = None) -> list[dict]:
+    """Uma página do quadro. `extras` são os filtros que o servidor aplica."""
     params = {'recordTypeId': RECORD_TYPE_ID, 'perPage': PAGE_SIZE, 'page': n, **(extras or {})}
-    url = cred['baseUrl'].rstrip('/') + '/crm/records/%s?' % OBJECT_KEY + urllib.parse.urlencode(params)
-    with urllib.request.urlopen(urllib.request.Request(url, headers=_headers(cred)), timeout=TIMEOUT) as r:
-        return json.loads(r.read().decode() or '{}').get('items') or []
+    dados = api('/crm/records/%s' % OBJECT_KEY, params)
+    return dados.get('items') or []
 
 
-def _minha_lista() -> list[dict]:
+def ids_das_fases(fases: list[str] | None) -> str:
+    """Nomes de fase → ids, na forma que a API aceita em `currentPhaseIds`.
+
+    Fase desconhecida é erro do usuário, não do servidor: melhor recusar aqui do
+    que mandar um id inventado e receber o quadro inteiro de volta.
+    """
+    nomes = [f for f in (fases or []) if f]
+    invalidas = [f for f in nomes if f not in PHASE_IDS]
+    if invalidas:
+        raise LeiaError('Fase inválida: %s. Válidas: %s'
+                        % (', '.join(invalidas), ', '.join(PHASE_ORDER)))
+    return ','.join(PHASE_IDS[f] for f in nomes)
+
+
+def _so_nessas_fases(rec: dict, fases: list[str] | None) -> bool:
+    """Conferência local do recorte por fase — o servidor já filtrou; isto é a rede de segurança."""
+    if not fases:
+        return True
+    atual = rec.get('currentPhaseId')
+    return PHASE_BY_ID.get(str(atual) if atual else '') in fases
+
+
+def _minha_lista(fases: list[str] | None = None) -> list[dict]:
     """Cards do quadro em que eu sou o **Responsável**: uma consulta, com cache.
 
-    O filtro vai no servidor (`owner`), e o resultado é conferido aqui: servidor
-    que ainda não conheça o parâmetro o ignora e devolveria o quadro inteiro — e
-    filtrar por participante, que era o que se fazia, trazia card de outra pessoa.
+    O filtro vai no servidor (`owner` e, com `fases`, `currentPhaseIds`), e o
+    resultado é conferido aqui: servidor que ainda não conheça o parâmetro o
+    ignora e devolveria o quadro inteiro — e filtrar por participante, que era o
+    que se fazia, trazia card de outra pessoa. Pedir a fase no SERVIDOR é o que
+    evita baixar o quadro todo (103 cards meus) para mostrar 8.
     """
-    cacheado = _cache_get('meus')
+    chave = 'meus' if not fases else 'meus:%s' % ','.join(fases)
+    cacheado = _cache_get(chave)
     if cacheado is not None:
         return cacheado  # type: ignore[return-value]
     cred = credentials()
     eu = cred.get('userId')
+    extras = {'owner': eu}
+    if fases:
+        extras['currentPhaseIds'] = ids_das_fases(fases)
     items, pagina = [], 1
     while True:
-        lote = _pagina(cred, pagina, {'owner': eu})
-        items += [r for r in lote if r.get('ownerId') == eu]
+        lote = _pagina(cred, pagina, extras)
+        items += [r for r in lote if r.get('ownerId') == eu and _so_nessas_fases(r, fases)]
         if len(lote) < PAGE_SIZE:
             break
         pagina += 1
-    _cache_set('meus', items)
+    _cache_set(chave, items)
     return items
 
 
-def _todo_o_quadro() -> list[dict]:
-    """Todos os cards do quadro (paginado em paralelo, com cache)."""
-    cacheado = _cache_get('quadro')
+def _todo_o_quadro(fases: list[str] | None = None) -> list[dict]:
+    """Todos os cards do quadro (paginado em paralelo, com cache).
+
+    Com `fases`, o recorte é feito no servidor — a consulta entra pelo índice de
+    fase (`ownerId, objectKey, currentPhaseId, phaseOrder`) em vez de varrer o
+    quadro e descartar aqui.
+    """
+    chave = 'quadro' if not fases else 'quadro:%s' % ','.join(fases)
+    cacheado = _cache_get(chave)
     if cacheado is not None:
         return cacheado  # type: ignore[return-value]
     cred = credentials()
-    primeira = _pagina(cred, 1)
+    extras = {'currentPhaseIds': ids_das_fases(fases)} if fases else {}
+    primeira = _pagina(cred, 1, extras)
     if len(primeira) < PAGE_SIZE:
-        _cache_set('quadro', primeira)
+        _cache_set(chave, primeira)
         return primeira
     paginas = [primeira]
     n = 2
     with ThreadPoolExecutor(max_workers=5) as pool:
         while True:
-            lote = list(pool.map(lambda p: _pagina(cred, p), range(n, n + 5)))
+            lote = list(pool.map(lambda p: _pagina(cred, p, extras), range(n, n + 5)))
             paginas.extend(lote)
             if any(len(p) < PAGE_SIZE for p in lote):
                 break
             n += 5
-    todos = [c for p in paginas for c in p]
-    _cache_set('quadro', todos)
+    todos = [c for p in paginas for c in p if _so_nessas_fases(c, fases)]
+    _cache_set(chave, todos)
     return todos
 
 
-def cards_de(quem: str) -> list[dict]:
-    """Cards de um recorte: `eu` (responsável sou eu) ou `ninguem` (sem responsável)."""
+def cards_de(quem: str, fases: list[str] | None = None) -> list[dict]:
+    """Cards de um recorte: `eu` (responsável sou eu) ou `ninguem` (sem responsável).
+
+    `fases` limita a consulta no servidor; sem ele, vem o recorte inteiro.
+    """
     if quem == 'eu':
-        base = _minha_lista()
+        base = _minha_lista(fases)
     elif quem == 'ninguem':
-        base = [c for c in _todo_o_quadro() if not _responsaveis(c)]
+        base = [c for c in _todo_o_quadro(fases) if not _responsaveis(c)]
     else:
         raise LeiaError(f'recorte desconhecido: {quem}')
     mapa = nomes([i for c in base for i in _responsaveis(c)])
@@ -378,11 +479,12 @@ def cards_pendentes(quem: str) -> list[dict]:
 
     Backlog é onde a coisa ainda não foi refinada — não é fila de trabalho.
     """
-    return [c for c in cards_de(quem) if c['fase'] in ATIVAS]
+    return [c for c in cards_de(quem, list(ATIVAS)) if c['fase'] in ATIVAS]
 
 
 def cards_na_fase(quem: str, fase: str) -> list[dict]:
-    return [c for c in cards_de(quem) if c['fase'] == fase]
+    """Cards do recorte numa fase — a fase já vai filtrada na consulta."""
+    return [c for c in cards_de(quem, [fase]) if c['fase'] == fase]
 
 
 def _trecho(rec: dict, limite: int = 160) -> str | None:
