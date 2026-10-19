@@ -487,6 +487,50 @@ def cards_na_fase(quem: str, fase: str) -> list[dict]:
     return [c for c in cards_de(quem, [fase]) if c['fase'] == fase]
 
 
+def recentes(quem: str | None, fase: str, limite: int, predicado=None) -> tuple[int, list[dict]]:
+    """Os `limite` cards de uma fase mais recentemente atualizados, e o total da fase.
+
+    Ordem e corte são do SERVIDOR (`sort=-updatedAt` + `perPage`): nada de baixar o
+    recorte e ordenar aqui. `quem`: `eu` (Responsável sou eu), `ninguem` (sem
+    Responsável) ou None (qualquer um). Com `predicado` (filtro que o servidor não
+    tem, ex. nome do responsável) as páginas — já ordenadas pelo servidor — são
+    percorridas até o fim para contar o total, guardando só as `limite` primeiras.
+    """
+    if fase not in PHASE_IDS:
+        raise LeiaError(f'Fase inválida: {fase}. Válidas: {", ".join(PHASE_ORDER)}')
+    params = {'recordTypeId': RECORD_TYPE_ID, 'currentPhaseId': PHASE_IDS[fase], 'sort': '-updatedAt'}
+    if quem == 'eu':
+        params['owner'] = credentials().get('userId')
+    elif quem == 'ninguem':
+        params['owner'] = 'none'
+    elif quem is not None:
+        raise LeiaError(f'recorte desconhecido: {quem}')
+    limite = max(0, int(limite))
+    brutos, total, pagina = [], 0, 1
+    while True:
+        por_pagina = PAGE_SIZE if predicado else min(max(limite - len(brutos), 1), PAGE_SIZE)
+        dados = api('/crm/records/%s' % OBJECT_KEY, {**params, 'page': pagina, 'perPage': por_pagina})
+        lote = [r for r in (dados.get('items') or []) if r.get('currentPhaseId') == PHASE_IDS[fase]]
+        if quem == 'eu':
+            lote = [r for r in lote if r.get('ownerId') == params['owner']]
+        elif quem == 'ninguem':
+            lote = [r for r in lote if not _responsaveis(r)]
+        if predicado:
+            lote = [r for r in lote if predicado(r)]
+            total += len(lote)
+            brutos += lote[:max(0, limite - len(brutos))]
+        else:
+            total = int(dados.get('total') or 0)
+            brutos += lote
+        recebidos = len(dados.get('items') or [])
+        if recebidos < por_pagina or (not predicado and len(brutos) >= limite):
+            break
+        pagina += 1
+    brutos = brutos[:limite]
+    mapa = nomes([i for c in brutos for i in _responsaveis(c)])
+    return total, [_resumo(c, mapa) for c in brutos]
+
+
 def _trecho(rec: dict, limite: int = 160) -> str | None:
     """Começo da descrição, numa linha — identifica o card sem ler o texto todo."""
     for cf in rec.get('customFields') or []:

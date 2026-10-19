@@ -31,26 +31,25 @@ TIPOS = ['Feature', 'Bug', 'Investigacao']
 # ── infra comum ───────────────────────────────────────────────────────────────
 
 
-def _agrupar(consulta: str, cards: list[dict], limite: int) -> dict:
-    """Agrupa por fase na ordem do quadro, mais parado primeiro, e corta no limite."""
-    por_fase: dict[str, list] = {}
-    for c in cards:
-        por_fase.setdefault(c['fase'], []).append(c)
-    fases, restante = [], max(0, int(limite or 40))
+def _agrupar(consulta: str, quem: str | None, fases: list[str], limite: int, predicado=None) -> dict:
+    """Agrupa por fase na ordem do quadro, mais recente primeiro; ordem e corte vêm do servidor."""
+    fases_out, restante, total = [], max(0, int(limite or 40)), 0
     for fase in crm.PHASE_ORDER:
-        if fase not in por_fase or restante == 0:
+        if fase not in fases:
             continue
-        lista = sorted(por_fase[fase], key=lambda c: (c.get('atualizado_em') or '9999-99-99', c.get('titulo') or ''))
-        recorte = lista[:restante]
-        restante -= len(recorte)
-        fases.append({'fase': fase, 'total_na_fase': len(lista), 'cards': recorte})
+        n, cards = crm.recentes(quem, fase, restante, predicado)
+        total += n
+        restante -= len(cards)
+        if n:
+            fases_out.append({'fase': fase, 'total_na_fase': n, 'cards': cards})
     return {
         'consulta': consulta,
-        'total': len(cards),
-        'mostrados': sum(len(f['cards']) for f in fases),
-        'fases': fases,
-        'nota': ('lista completa deste recorte, agrupada por fase e ordenada do card mais parado '
-                 'para o mais recente; cada card traz id, criado_em e atualizado_em (hora local) '
+        'total': total,
+        'mostrados': sum(len(f['cards']) for f in fases_out),
+        'fases': fases_out,
+        'nota': ('agrupada por fase e, dentro de cada fase, ordenada do card atualizado mais '
+                 'recentemente para o mais antigo (ordem e limite aplicados pelo servidor); '
+                 'cada card traz id, criado_em e atualizado_em (hora local) '
                  'e dois tempos em texto com unidade — tempo_desde_criacao e tempo_sem_mudanca: '
                  'AGORA, 45MIN, 3H, 5D, 2M. Leia como está: "5D" são cinco dias, "3H" são três '
                  'horas; nunca arredonde "0" para "hoje". Precisando de mais itens, aumente '
@@ -60,15 +59,11 @@ def _agrupar(consulta: str, cards: list[dict], limite: int) -> dict:
 
 
 def _lista(quem: str, fase: str | None, limite: int) -> dict:
-    """Lista do recorte. A FASE vai na consulta (o servidor filtra pelo índice de
-    fase); sem fase pedida, o recorte são as fases de trabalho."""
-    fases: list[str] = [fase] if fase else list(crm.ATIVAS)
-    cards = crm.cards_de(quem, fases)
     base = 'minhas tarefas' if quem == 'eu' else 'tarefas sem nenhum responsável'
     if fase:
-        return _agrupar('%s em %s' % (base, fase), [c for c in cards if c['fase'] == fase], limite)
+        return _agrupar('%s em %s' % (base, fase), quem, [fase], limite)
     return _agrupar('%s já na fila de trabalho (sem Backlog e Feito)' % base,
-                    [c for c in cards if c['fase'] in crm.ATIVAS], limite)
+                    quem, list(crm.ATIVAS), limite)
 
 
 def _resolver(tarefa: str) -> tuple[dict | None, object]:
@@ -156,19 +151,15 @@ def listar(fase: str | None = None, responsavel: str | None = None,
     incluir_backlog_e_feito=true."""
     if fase and fase not in crm.PHASE_IDS:
         raise crm.LeiaError(f'Fase inválida: {fase}. Válidas: {", ".join(crm.PHASE_ORDER)}')
-    fases: list[str] | None = [fase] if fase else (None if incluir_backlog_e_feito else list(crm.ATIVAS))
-    todos = crm._todo_o_quadro(fases)
-    mapa = crm.nomes([i for c in todos for i in crm._responsaveis(c)])
-    cards = [crm._resumo(c, mapa) for c in todos]
-    if fase:
-        cards = [c for c in cards if c['fase'] == fase]
-    elif not incluir_backlog_e_feito:
-        cards = [c for c in cards if c['fase'] in crm.ATIVAS]
+    fases = [fase] if fase else (list(crm.PHASE_ORDER) if incluir_backlog_e_feito else list(crm.ATIVAS))
+    predicado = None
     if responsavel:
         alvo = responsavel.strip().lower()
-        cards = [c for c in cards if any(alvo in (r or '').lower() for r in c['responsaveis'])]
+        ids = [i for c in crm._todo_o_quadro(fases) for i in crm._responsaveis(c)]
+        mapa = crm.nomes(list(dict.fromkeys(ids)))
+        predicado = lambda r: any(alvo in (mapa.get(i, i) or '').lower() for i in crm._responsaveis(r))  # noqa: E731
     consulta = 'quadro' + (f' em {fase}' if fase else '') + (f' com responsável ~"{responsavel}"' if responsavel else '')
-    return _agrupar(consulta, cards, limite)
+    return _agrupar(consulta, None, fases, limite, predicado)
 
 
 def buscar(termo: str, limite: int = 15) -> dict:
