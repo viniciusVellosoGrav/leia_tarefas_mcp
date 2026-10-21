@@ -9,8 +9,16 @@ Regras do quadro que este módulo assume (apuradas no ambiente em 24/09/2026):
 
 - Objeto `leia_tasks`, tipo de registro "Tarefas Leia" (o outro tipo do mesmo
   objeto — "Tarefas NEP" — é outro quadro e fica de fora).
-- Seis fases, nesta ordem: Backlog, A Fazer, Com Impedimento, Fazendo,
-  Aguardando Aprovação, Feito. "Pendente" = qualquer fase menos Feito.
+- Oito fases, nesta ordem: Backlog, Refinamento, A Fazer, Com Impedimento,
+  Fazendo, Aguardando Aprovação, Aguardando publicação, Feito.
+- Backlog e Refinamento não são fila de trabalho (card ali ainda não foi
+  refinado): ficam fora das consultas de pendente. "Pendente" = A Fazer, Com
+  Impedimento, Fazendo, Aguardando Aprovação e Aguardando publicação.
+  (Revisado em 21/10/2026: o quadro ganhou "Refinamento" e "Aguardando
+  publicação" em 15/10/2026 e o mapa fixo de fases deixou 19 cards invisíveis
+  para toda listagem — card em fase fora de `PHASE_IDS` volta com o id cru. O
+  processo inteiro vem de `GET /crm/processes`; `tests/test_smoke.py` confere
+  que nenhuma fase do quadro ficou fora deste mapa.)
 - Quem cuida do card é o campo nativo **Responsável** (`ownerId`) — é o campo que
   o app desenha no card e o que os relatórios chamam de "Sem responsável".
   Participante não conta para isso.
@@ -48,20 +56,25 @@ FIELD_CLIENTE = '6a748c8fcb09e9df2123b34d'
 FIELD_TIPO = '6a763b3b1750de2274368ab4'
 FIELD_PRIORIDADE = '6a763b711750de2274368ab7'
 FIELD_CHECKLIST = '6a506b201780517ef130c44d'
-PHASE_ORDER = ['Backlog', 'A Fazer', 'Com Impedimento', 'Fazendo', 'Aguardando Aprovação', 'Feito']
+PHASE_ORDER = ['Backlog', 'Refinamento', 'A Fazer', 'Com Impedimento', 'Fazendo',
+               'Aguardando Aprovação', 'Aguardando publicação', 'Feito']
 PHASE_IDS = {
     'Backlog': '6a4b02e4a25728ec1910027b',
+    'Refinamento': '6ad0dee3a6e4d53001e9882d',
     'A Fazer': '6a4b02e4a25728ec1910027c',
     'Com Impedimento': 'c3a7f6b6fa5c0c3d62ae5f03',
     'Fazendo': '6a4b02e4a25728ec1910027d',
     'Aguardando Aprovação': 'e4833d400748720e58eddd69',
+    'Aguardando publicação': '6ad0dee3a6e4d53001e9882e',
     'Feito': '6a4b02e4a25728ec1910027e',
 }
 PHASE_BY_ID = {v: k for k, v in PHASE_IDS.items()}
 DONE, DOING = 'Feito', 'Fazendo'
 BACKLOG, A_FAZER = 'Backlog', 'A Fazer'
-# Fila de trabalho de verdade: Backlog (não refinado) e Feito ficam de fora.
-ATIVAS = ('A Fazer', 'Com Impedimento', 'Fazendo', 'Aguardando Aprovação')
+# Fila de trabalho de verdade: Backlog e Refinamento (card ainda não refinado) e Feito
+# ficam de fora. "Aguardando publicação" entra: o trabalho acabou, a entrega não.
+ATIVAS = ('A Fazer', 'Com Impedimento', 'Fazendo', 'Aguardando Aprovação',
+          'Aguardando publicação')
 TIMEOUT = 25
 PAGE_SIZE = 100
 BOARD_TTL = 60           # s — leitura repetida dentro desse prazo não volta à rede
@@ -475,9 +488,9 @@ def cards_de(quem: str, fases: list[str] | None = None) -> list[dict]:
 
 
 def cards_pendentes(quem: str) -> list[dict]:
-    """Cards do recorte que dá para pegar agora: fora de Backlog e de Feito.
+    """Cards do recorte que dá para pegar agora: fora de Backlog, Refinamento e Feito.
 
-    Backlog é onde a coisa ainda não foi refinada — não é fila de trabalho.
+    Backlog e Refinamento são onde a coisa ainda não foi refinada — não é fila de trabalho.
     """
     return [c for c in cards_de(quem, list(ATIVAS)) if c['fase'] in ATIVAS]
 

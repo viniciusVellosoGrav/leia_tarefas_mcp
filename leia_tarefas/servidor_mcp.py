@@ -18,9 +18,11 @@ ferramentas para qualquer pergunta sobre ele ("minhas tarefas", "sem responsáve
 "mover card", "concluir tarefa", "quadro do CRM"); nunca monte chamada HTTP na mão.
 
 Regras do quadro:
-- Fases, nesta ordem: Backlog, A Fazer, Com Impedimento, Fazendo, Aguardando Aprovação, Feito.
-- Backlog não é fila de trabalho (não refinado, ninguém inicia ali). "Pendente" =
-  A Fazer, Com Impedimento, Fazendo, Aguardando Aprovação.
+- Fases, nesta ordem: Backlog, Refinamento, A Fazer, Com Impedimento, Fazendo,
+  Aguardando Aprovação, Aguardando publicação, Feito.
+- Backlog e Refinamento não são fila de trabalho (não refinado, ninguém inicia ali).
+  "Pendente" = A Fazer, Com Impedimento, Fazendo, Aguardando Aprovação, Aguardando
+  publicação.
 - "Sem ninguém atribuído" é a coluna A Fazer, não o quadro inteiro.
 - Quem cuida do card é o campo nativo "Responsável" (o que o app mostra no card);
   ser participante não conta. Campo antigo "Membros" não é mais fonte de nada.

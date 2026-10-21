@@ -62,7 +62,7 @@ def _lista(quem: str, fase: str | None, limite: int) -> dict:
     base = 'minhas tarefas' if quem == 'eu' else 'tarefas sem nenhum responsável'
     if fase:
         return _agrupar('%s em %s' % (base, fase), quem, [fase], limite)
-    return _agrupar('%s já na fila de trabalho (sem Backlog e Feito)' % base,
+    return _agrupar('%s já na fila de trabalho (sem Backlog, Refinamento e Feito)' % base,
                     quem, list(crm.ATIVAS), limite)
 
 
@@ -118,8 +118,8 @@ def _mover(tarefa: str, fase: str) -> dict:
 
 def minhas_pendentes(limite: int = 40) -> dict:
     """Tarefas em que EU sou o Responsável, já na fila de trabalho — A Fazer, Com Impedimento,
-    Fazendo e Aguardando Aprovação. Backlog fica de fora (não refinado) e Feito também (acabou).
-    Ser só participante não conta."""
+    Fazendo, Aguardando Aprovação e Aguardando publicação. Backlog e Refinamento ficam de fora
+    (ainda não refinado) e Feito também (acabou). Ser só participante não conta."""
     return _lista('eu', None, limite)
 
 
@@ -130,9 +130,10 @@ def minhas_fazendo(limite: int = 40) -> dict:
 
 
 def minhas_na_fase(fase: str, limite: int = 40) -> dict:
-    """Minhas tarefas NUMA fase do quadro — A Fazer, Com Impedimento, Fazendo, Aguardando
-    Aprovação, Backlog ou Feito. A fase é filtrada NO SERVIDOR (o recorte entra pelo índice de
-    fase), então a consulta traz só os cards daquela fase em vez de baixar o quadro inteiro.
+    """Minhas tarefas NUMA fase do quadro — Backlog, Refinamento, A Fazer, Com Impedimento,
+    Fazendo, Aguardando Aprovação, Aguardando publicação ou Feito. A fase é filtrada NO SERVIDOR
+    (o recorte entra pelo índice de fase), então a consulta traz só os cards daquela fase em vez
+    de baixar o quadro inteiro.
     Responsável sou eu; ser só participante não conta."""
     return _lista('eu', fase, limite)
 
@@ -191,8 +192,8 @@ def concluir(tarefa: str) -> dict:
 
 
 def mover_fase(tarefa: str, fase: str) -> dict:
-    """Move um card atribuído a mim para a fase escolhida: Backlog, A Fazer, Com Impedimento,
-    Fazendo, Aguardando Aprovação ou Feito."""
+    """Move um card atribuído a mim para a fase escolhida: Backlog, Refinamento, A Fazer, Com
+    Impedimento, Fazendo, Aguardando Aprovação, Aguardando publicação ou Feito."""
     if fase not in crm.PHASE_IDS:
         raise crm.LeiaError(f'Fase inválida: {fase}. Válidas: {", ".join(crm.PHASE_ORDER)}')
     return _mover(tarefa, fase)
