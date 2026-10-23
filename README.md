@@ -7,7 +7,7 @@ código, servido de **duas** formas:
 - **plugin nativo do Hermes** — ferramentas nativas no chat (desktop e Discord).
 
 Antes existiam duas cópias do mesmo cliente, em pastas diferentes, que já tinham
-divergido (o plugin do Hermes parou em 8 ferramentas; o servidor MCP foi para 19).
+divergido (o plugin do Hermes parou em 8 ferramentas; o servidor MCP foi para 19; hoje são 22).
 Aqui o núcleo é um só e os dois modos leem o **mesmo catálogo**.
 
 ## Layout
@@ -16,7 +16,7 @@ Aqui o núcleo é um só e os dois modos leem o **mesmo catálogo**.
 mcp_server.py                 entry point do modo MCP (uv run --script; PEP 723)
 leia_tarefas/
   crm.py                      cliente HTTP do CRM + regras do quadro (só stdlib)
-  ferramentas.py              catálogo NEUTRO das 19 ferramentas — regra de negócio mora aqui
+  ferramentas.py              catálogo NEUTRO das 22 ferramentas — regra de negócio mora aqui
   servidor_mcp.py             adaptador fino: catálogo -> ferramentas MCP (FastMCP)
 hermes_plugin/
   __init__.py                 adaptador fino: catálogo -> tools do registry do Hermes

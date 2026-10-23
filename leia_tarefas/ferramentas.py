@@ -304,6 +304,29 @@ def me_remover(tarefa: str) -> dict:
     return _responsavel(tarefa, False)
 
 
+def buscar_pessoas(termo: str, limite: int = 10) -> dict:
+    """Acha pessoas do time pelo nome (ou parte dele) para usar como participante de card: devolve
+    id, nome e e-mail dos melhores resultados (busca feita no servidor, só o topo; padrão 10, máx.
+    25). Casa por palavra/prefixo e tolera pouco erro de digitação; sem resultado, tente um
+    pedaço menor do nome. Se mais de uma pessoa casar, quem escolhe é o usuário."""
+    return {'termo': termo, 'pessoas': crm.buscar_pessoas(termo, limite)}
+
+
+def participantes(tarefa: str, adicionar: list[str] | None = None, remover: list[str] | None = None,
+                  papel: str = 'editor') -> dict:
+    """Adiciona e/ou remove PARTICIPANTES de um card do quadro (não mexe no Responsável nem na
+    fase). `tarefa` = id ou trecho do título. `adicionar` / `remover` = listas de ids de usuário
+    (pegue em `buscar_pessoas`). `papel` de quem entra: viewer, editor (padrão) ou admin; quem já
+    é participante com outro papel tem o papel trocado. O Responsável do card não entra como
+    participante. Só quem é Responsável, participante admin ou admin do CRM pode alterar
+    (o servidor recusa os demais). Devolve a lista de participantes como ficou, lida de volta."""
+    card, erro = _resolver(tarefa)
+    if card is None:
+        return _falha(erro)
+    saida = crm.editar_participantes(card['id'], adicionar or [], remover or [], papel)
+    return {'card': {'id': card['id'], 'titulo': card['titulo']}, **saida}
+
+
 def _itens(resposta) -> list[dict]:
     if isinstance(resposta, list):
         return resposta
@@ -422,6 +445,8 @@ CATALOGO: list[dict] = [
     {'funcao': renomear, 'emoji': '🏷️', 'curta': 'Trocar o título de um card meu'},
     {'funcao': me_adicionar, 'emoji': '🙋', 'curta': 'Me definir como Responsável de um card do quadro'},
     {'funcao': me_remover, 'emoji': '🚪', 'curta': 'Me tirar do Responsável (o card fica sem dono)'},
+    {'funcao': buscar_pessoas, 'emoji': '👥', 'curta': 'Achar pessoas do time pelo nome (id para participante)'},
+    {'funcao': participantes, 'emoji': '🤝', 'curta': 'Adicionar/remover participantes de um card (não muda o Responsável)'},
     {'funcao': criar_card, 'emoji': '🆕', 'curta': 'Criar card no quadro (nasce em A Fazer, sem responsável)'},
     {'funcao': comentarios, 'emoji': '💬', 'curta': 'Comentários recentes de um card'},
     {'funcao': comentar, 'emoji': '📝', 'curta': 'Comentar em um card do quadro'},

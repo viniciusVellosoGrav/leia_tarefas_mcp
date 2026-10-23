@@ -866,6 +866,78 @@ def definir_responsavel(card_id: str, user_id: str | None) -> list[str]:
     return _responsaveis(registro(card_id))
 
 
+# ── pessoas e participantes ───────────────────────────────────────────────────
+#
+# Participante NÃO é campo customizado: é `participants: [{userId, role}]` do registro, com
+# rotas próprias (as que o app usa) — `POST /crm/records/<objeto>/<id>/participants`
+# `{userId, role}` (adiciona ou muda o papel) e `DELETE .../participants/<userId>`. PATCH não
+# mexe nisso. Não tem relação com o Responsável (`ownerId`), que continua intocado.
+
+PAPEIS_PARTICIPANTE = ('viewer', 'editor', 'admin')
+
+
+def buscar_pessoas(termo: str, limite: int = 10) -> list[dict]:
+    """Pessoas ativas cujo nome casa com o termo — busca no servidor (Meilisearch), só o topo."""
+    termo = (termo or '').strip()
+    if not termo:
+        raise LeiaError('Informe um nome (ou parte dele) para buscar a pessoa.')
+    dados = api('/users/find', {'name': termo, 'limit': min(max(int(limite or 10), 1), 25),
+                                'excludeServiceAccounts': 'true', 'fields': 'name,email,disabled'})
+    return [{'id': u.get('id'), 'nome': u.get('name'), 'email': u.get('email')}
+            for u in dados.get('data') or [] if u.get('id') and not u.get('disabled')]
+
+
+def _participantes_de(rec: dict) -> list[dict]:
+    mapa = nomes([p.get('userId') for p in rec.get('participants') or []])
+    return [{'id': p.get('userId'), 'nome': mapa.get(p.get('userId'), p.get('userId')), 'papel': p.get('role')}
+            for p in rec.get('participants') or []]
+
+
+def editar_participantes(card_id: str, adicionar: list[str], remover: list[str], papel: str) -> dict:
+    """Adiciona/remove participantes (por id de usuário) e devolve a lista relida e o que mudou.
+
+    Valida tudo antes de gravar (ids existentes, sem repetir, sem o Responsável como participante),
+    para um erro não deixar a edição pela metade.
+    """
+    if papel not in PAPEIS_PARTICIPANTE:
+        raise LeiaError(f'Papel inválido: {papel}. Válidos: {", ".join(PAPEIS_PARTICIPANTE)}')
+    adicionar = list(dict.fromkeys(i.strip() for i in adicionar or [] if (i or '').strip()))
+    remover = list(dict.fromkeys(i.strip() for i in remover or [] if (i or '').strip()))
+    if not adicionar and not remover:
+        raise LeiaError('Nada a fazer: informe "adicionar" e/ou "remover" (ids de `buscar_pessoas`).')
+    if set(adicionar) & set(remover):
+        raise LeiaError('O mesmo id está em "adicionar" e em "remover".')
+    rec = registro(card_id)
+    atuais = {p.get('userId'): p.get('role') for p in rec.get('participants') or []}
+    if rec.get('ownerId') in adicionar:
+        raise LeiaError('Essa pessoa já é o Responsável do card; o Responsável não entra como participante. Não mexi em nada.')
+    existentes = {u['id'] for u in (api('/users/find', {'ids': ','.join(adicionar), 'limit': 100}).get('data') or [])} \
+        if adicionar else set()
+    sem_cadastro = [i for i in adicionar if i not in existentes]
+    if sem_cadastro:
+        raise LeiaError('Id de usuário inexistente: %s. Use `buscar_pessoas` para achar o id. Não mexi em nada.'
+                        % ', '.join(sem_cadastro))
+    mudou = {'adicionados': [], 'papel_alterado': [], 'removidos': [], 'ja_estavam': [], 'nao_eram_participantes': []}
+    for uid in adicionar:
+        if atuais.get(uid) == papel:
+            mudou['ja_estavam'].append(uid)
+            continue
+        api('/crm/records/%s/%s/participants' % (OBJECT_KEY, card_id), method='POST',
+            body={'userId': uid, 'role': papel})
+        mudou['papel_alterado' if uid in atuais else 'adicionados'].append(uid)
+    for uid in remover:
+        if uid not in atuais:
+            mudou['nao_eram_participantes'].append(uid)
+            continue
+        api('/crm/records/%s/%s/participants/%s' % (OBJECT_KEY, card_id, urllib.parse.quote(uid, safe='')),
+            method='DELETE')
+        mudou['removidos'].append(uid)
+    _cache_limpa()
+    nm = nomes([i for v in mudou.values() for i in v])
+    return {'participantes': _participantes_de(registro(card_id)),
+            'mudou': {k: [nm.get(i, i) for i in v] for k, v in mudou.items() if v}}
+
+
 # ── comentários ───────────────────────────────────────────────────────────────
 #
 # `/crm/comments` é genérico (objectType + objectId) e devolve do mais antigo

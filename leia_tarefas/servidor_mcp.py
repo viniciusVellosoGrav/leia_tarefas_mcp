@@ -53,6 +53,11 @@ Regras do quadro:
   pessoa, ela é transferida — a nota diz de quem era) e `me_remover` tira (o card fica sem
   dono). Valem em qualquer card do quadro e não mexem na fase. Não há ferramenta para
   atribuir outra pessoa, de propósito. Para pegar um card: `me_adicionar` e depois `iniciar`.
+- Participantes: `buscar_pessoas` acha gente pelo nome (id + nome + e-mail; se mais de uma casar,
+  o usuário escolhe) e `participantes` adiciona/remove participantes de qualquer card do quadro
+  (por id, papel padrão editor). Não mexe no Responsável nem na fase; o Responsável não entra
+  como participante. O servidor só deixa o Responsável, participante admin ou admin do CRM
+  alterar — se recusar, repasse o motivo. Mostre a lista devolvida como está.
 """
 
 mcp = FastMCP('leia-tarefas', instructions=INSTRUCOES)
