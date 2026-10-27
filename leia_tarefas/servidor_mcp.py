@@ -36,6 +36,9 @@ Regras do quadro:
 - Comentários: `comentarios` traz os mais recentes (padrão 10). Qualquer card do quadro
   aceita comentário. Excluir comentário só o próprio autor (vai para a lixeira do CRM);
   confirme com o usuário antes. Mostre o texto dos comentários como está.
+- Arquivos: `comentar` aceita `arquivos` (caminhos locais, até 30 MB cada; texto opcional) e
+  `anexar_no_card` põe arquivos no campo de arquivo de um card meu (nunca cria campo; sem campo
+  recusa; com mais de um pede `campo`). Mostre os anexos devolvidos como estão.
 - Onde se pede um card, aceita o id (24 caracteres) ou um trecho do título. Se mais de
   um casa, voltam candidatos: quem escolhe é o usuário, nunca adivinhe.
 - As listas trazem só o resumo; descrição e demais campos vêm de `card`. Mostre a

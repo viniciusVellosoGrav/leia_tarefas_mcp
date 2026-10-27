@@ -385,22 +385,72 @@ def criar_card(titulo: str, descricao: str | None = None, tipo: str | None = Non
 
 def comentarios(tarefa: str, limite: int = 10) -> dict:
     """Comentários mais recentes de um card (padrão 10, máx. 100), do mais antigo ao mais novo.
-    Cada um traz id, autor, data e texto. `tarefa` = id do card ou trecho do título."""
+    Cada um traz id, autor, data, texto e nomes dos anexos (`anexos`), se houver. `tarefa` = id do card ou trecho do título."""
     card, erro = _resolver(tarefa)
     if card is None:
         return _falha(erro)
     return {'card': {'id': card['id'], 'titulo': card['titulo']}, **crm.comentarios(card['id'], limite)}
 
 
-def comentar(tarefa: str, texto: str) -> dict:
-    """Adiciona um comentário (texto puro) a um card do quadro, em nome de quem usa o token.
-    `tarefa` = id do card ou trecho do título."""
-    if not (texto or '').strip():
-        raise crm.LeiaError('Comentário vazio: informe o texto.')
+def comentar(tarefa: str, texto: str = '', arquivos: list[str] | None = None) -> dict:
+    """Adiciona um comentário a um card do quadro, em nome de quem usa o token. `tarefa` = id do
+    card ou trecho do título. `texto` é puro e opcional quando houver `arquivos` (lista de caminhos
+    locais; até 30 MB cada, tipo inferido pela extensão). Os arquivos são validados antes e só então
+    enviados e anexados ao comentário; falhou um, nada é comentado."""
+    if not (texto or '').strip() and not arquivos:
+        raise crm.LeiaError('Comentário vazio: informe o texto e/ou arquivos.')
     card, erro = _resolver(tarefa)
     if card is None:
         return _falha(erro)
-    return {'card': {'id': card['id'], 'titulo': card['titulo']}, 'comentario': crm.comentar(card['id'], texto)}
+    refs = crm.enviar_arquivos(arquivos) if arquivos else None
+    return {'card': {'id': card['id'], 'titulo': card['titulo']},
+            'comentario': crm.comentar(card['id'], texto, refs)}
+
+
+def anexar_no_card(tarefa: str, arquivos: list[str], campo: str | None = None) -> dict:
+    """Anexa arquivos locais (caminhos; até 30 MB cada) ao campo de arquivo de um card atribuído a mim.
+    `tarefa` = id ou trecho do título. Só usa campo `file` já existente no objeto (nunca cria): se não
+    houver nenhum, recusa sem gravar; se houver mais de um e `campo` (id ou nome) não vier, devolve os
+    candidatos. Soma aos anexos que o card já tem (não sobrescreve), grava por atualização parcial e
+    devolve a lista relida. Para anexar a um comentário use `comentar`."""
+    if not arquivos:
+        raise crm.LeiaError('Informe ao menos um arquivo (caminho local).')
+    resumo, erro = _resolver(tarefa)
+    if resumo is None:
+        return _falha(erro)
+    _exigir_meu(resumo)
+    campos = crm.campos_arquivo()
+    escolhido, aviso = _escolher_campo_arquivo(campos, campo)
+    if escolhido is None:
+        return aviso
+    crm.validar_arquivos(arquivos)
+    refs = crm.enviar_arquivos(arquivos)
+    ficou = crm.anexar_no_campo(resumo['id'], escolhido['id'], refs)
+    chaves = {r['key'] for r in ficou}
+    faltam = [r['name'] for r in refs if r['key'] not in chaves]
+    if faltam:
+        raise crm.LeiaError('Gravei, mas a releitura não mostra: %s.' % ', '.join(faltam))
+    return {'card': {'id': resumo['id'], 'titulo': resumo['titulo']},
+            'campo': escolhido['label'],
+            'adicionados': [r['name'] for r in refs],
+            'anexos': [r.get('name') or r.get('key') for r in ficou]}
+
+
+def _escolher_campo_arquivo(campos: list[dict], campo: str | None) -> tuple[dict | None, dict | None]:
+    """(campo, None) quando dá para decidir; (None, resposta) quando é recusa ou candidatos."""
+    if not campos:
+        return None, {'erro': 'o card não tem campo de arquivo: o objeto não possui nenhum campo do tipo '
+                              '"file". Não criei campo nem gravei nada.'}
+    if campo:
+        alvo = campo.strip().lower()
+        achados = [c for c in campos if c['id'] == campo.strip() or (c['label'] or '').strip().lower() == alvo]
+        if len(achados) != 1:
+            return None, {'erro': f'campo "{campo}" não é um campo de arquivo conhecido; não gravei nada',
+                          'candidatos': campos}
+        return achados[0], None
+    if len(campos) > 1:
+        return None, {'erro': 'mais de um campo de arquivo; informe `campo`', 'candidatos': campos}
+    return campos[0], None
 
 
 def excluir_comentario(tarefa: str, comentario_id: str) -> dict:
@@ -450,6 +500,7 @@ CATALOGO: list[dict] = [
     {'funcao': criar_card, 'emoji': '🆕', 'curta': 'Criar card no quadro (nasce em A Fazer, sem responsável)'},
     {'funcao': comentarios, 'emoji': '💬', 'curta': 'Comentários recentes de um card'},
     {'funcao': comentar, 'emoji': '📝', 'curta': 'Comentar em um card do quadro'},
+    {'funcao': anexar_no_card, 'emoji': '📎', 'curta': 'Anexar arquivos ao campo de arquivo de um card meu'},
     {'funcao': excluir_comentario, 'emoji': '❌', 'curta': 'Excluir um comentário meu (lixeira do CRM)'},
 ]
 

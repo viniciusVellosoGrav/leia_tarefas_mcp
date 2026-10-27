@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import mimetypes
 import os
 import re
 import threading
@@ -987,13 +988,80 @@ def comentarios(card_id: str, limite: int = 10) -> dict:
     return {'total': total, 'mostrados': len(itens), 'comentarios': [_comentario(c, mapa) for c in itens]}
 
 
-def comentar(card_id: str, texto: str) -> dict:
+MAX_ARQUIVO = 30 * 1024 * 1024  # o backend recusa acima disso (413)
+
+
+def validar_arquivos(caminhos: list[str]) -> list[dict]:
+    """Confere cada caminho local (existe, é arquivo, não vazio, ≤30 MB) antes de enviar qualquer um.
+    Devolve [{caminho, nome, mime, tamanho}]; levanta LeiaError listando todos os problemas."""
+    itens, erros = [], []
+    for c in caminhos or []:
+        caminho = os.path.expanduser(str(c))
+        if not os.path.isfile(caminho):
+            erros.append(f'{c}: arquivo não encontrado')
+            continue
+        tamanho = os.path.getsize(caminho)
+        if tamanho == 0:
+            erros.append(f'{c}: arquivo vazio')
+        elif tamanho > MAX_ARQUIVO:
+            erros.append(f'{c}: {tamanho / 1048576:.1f} MB passa do limite de 30 MB')
+        else:
+            mime = mimetypes.guess_type(caminho)[0] or 'application/octet-stream'
+            itens.append({'caminho': caminho, 'nome': os.path.basename(caminho), 'mime': mime, 'tamanho': tamanho})
+    if erros:
+        raise LeiaError('Nada foi enviado. Problemas nos arquivos: ' + '; '.join(erros))
+    return itens
+
+
+def enviar_arquivo(item: dict) -> dict:
+    """Sobe um arquivo (URL presignada do CRM + PUT no S3) e devolve a referência {key,name,mimeType,size}."""
+    dados = api('/crm/files/uploadUrl', {'filename': item['nome'], 'contentType': item['mime'],
+                                         'size': item['tamanho']})
+    url, key = (dados or {}).get('url'), (dados or {}).get('key')
+    if not url or not key:
+        raise LeiaError('a API não devolveu url/key de upload: %s' % str(dados)[:300])
+    with open(item['caminho'], 'rb') as fh:
+        corpo = fh.read()
+    req = urllib.request.Request(url, data=corpo, method='PUT', headers={'Content-Type': item['mime']})
+    try:
+        with urllib.request.urlopen(req, timeout=max(TIMEOUT, 120)) as resp:
+            if resp.status >= 300:
+                raise LeiaError(f'upload de {item["nome"]} falhou: HTTP {resp.status}')
+    except urllib.error.HTTPError as exc:
+        raise LeiaError(f'upload de {item["nome"]} falhou: HTTP {exc.code} {exc.read()[:200].decode(errors="replace")}') from exc
+    except OSError as exc:
+        raise LeiaError(f'upload de {item["nome"]} falhou: {exc}') from exc
+    return {'key': key, 'name': item['nome'], 'mimeType': item['mime'], 'size': item['tamanho']}
+
+
+def enviar_arquivos(caminhos: list[str]) -> list[dict]:
+    """Valida todos e só então envia; devolve as referências na ordem recebida."""
+    return [enviar_arquivo(i) for i in validar_arquivos(caminhos)]
+
+
+def comentar(card_id: str, texto: str, anexos: list[dict] | None = None) -> dict:
     criado = api('/crm/comments', method='POST', body={
-        'objectType': OBJECT_KEY, 'objectId': card_id, 'content': texto, 'mentions': [], 'attachments': [],
+        'objectType': OBJECT_KEY, 'objectId': card_id, 'content': texto or '', 'mentions': [],
+        'attachments': anexos or [],
     })
     if not (criado or {}).get('id'):
         raise LeiaError('a API respondeu sem id: %s' % str(criado)[:300])
     return _comentario(criado, nomes([criado.get('createdBy')]))
+
+
+def campos_arquivo() -> list[dict]:
+    """Campos do tipo `file` do objeto do quadro: [{id, label}]."""
+    return [{'id': fid, 'label': m['label']} for fid, m in campos_meta().items() if m.get('tipo') == 'file']
+
+
+def anexar_no_campo(card_id: str, field_id: str, refs: list[dict]) -> list[dict]:
+    """Soma `refs` ao valor atual do campo de arquivo (lido agora), grava por PATCH parcial e
+    devolve o valor relido."""
+    atual = valor_campo(registro(card_id), field_id)
+    atual = list(atual) if isinstance(atual, list) else []
+    patch_campos(card_id, [{'fieldId': field_id, 'value': atual + refs}])
+    relido = valor_campo(registro(card_id), field_id)
+    return list(relido) if isinstance(relido, list) else []
 
 
 def excluir_comentario(comentario_id: str) -> None:
