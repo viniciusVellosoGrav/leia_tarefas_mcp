@@ -41,7 +41,7 @@ try {
         token,
         userId: id,
         baseUrl: 'https://grav-lightsail.grav.digital/leia_prod',
-        apiKey: 'rwf6HU',
+        apiKey: process.env.API_KEY,
         expiresAtMs: Date.now() + TTL * 1000,
     }
     const p = '/tmp/leia_tk.json'

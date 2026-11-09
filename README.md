@@ -1,78 +1,141 @@
 # leia-tarefas
 
-Quadro **"Tarefas Leia"** (kanban interno do CRM do ambiente `grav`) em **um**
-código, servido de **duas** formas:
+Quadro **"Tarefas Leia"** (kanban interno do CRM do ambiente `grav`) em **um** código, servido de
+**duas** formas:
 
 - **servidor MCP** (stdio) — consumido pelo Claude Code;
-- **plugin nativo do Hermes** — ferramentas nativas no chat (desktop e Discord).
+- **plugin nativo do Hermes** — ferramentas no chat (desktop e Discord).
 
-Antes existiam duas cópias do mesmo cliente, em pastas diferentes, que já tinham
-divergido (o plugin do Hermes parou em 8 ferramentas; o servidor MCP foi para 19; hoje são 22).
-Aqui o núcleo é um só e os dois modos leem o **mesmo catálogo**.
+Antes existiam duas cópias do mesmo cliente, em pastas diferentes, que já tinham divergido (o plugin
+do Hermes parou em 8 ferramentas; o servidor MCP foi para 19; hoje são 23). Aqui o núcleo é um só e
+os dois modos leem o **mesmo catálogo**.
 
-## Layout
+## Independência (importante)
 
-```
-mcp_server.py                 entry point do modo MCP (uv run --script; PEP 723)
-leia_tarefas/
-  crm.py                      cliente HTTP do CRM + regras do quadro (só stdlib)
-  ferramentas.py              catálogo NEUTRO das 22 ferramentas — regra de negócio mora aqui
-  servidor_mcp.py             adaptador fino: catálogo -> ferramentas MCP (FastMCP)
-hermes_plugin/
-  __init__.py                 adaptador fino: catálogo -> tools do registry do Hermes
-  plugin.yaml                 manifesto do plugin (nome: leia-tarefas)
-scripts/
-  remint.sh                   reemite o token na máquina do LEIA (ssh), com trava
-  renova.sh                   watchdog do token (silencioso quando está tudo bem)
-  mint_remoto.mjs             emissor que roda no container do backend (Mongo + JWT)
-tests/
-  test_paridade.py            plugin do Hermes == catálogo
-  test_mcp_stdio.py           servidor MCP (subido de verdade) == catálogo
-  paridade.sh                 roda os dois e compara
-```
+Este repositório **não conhece** o cronômetro e não depende dele: gerencia card, fase, Responsável,
+checklist e comentários. O único elo com o [clockify_mcp](https://github.com/viniciusVellosoGrav/clockify_mcp)
+é um **contrato de texto**: o título exato do card é a `descricao` do lançamento no Clockify — quem
+cria a ponte é o agente. A rotina completa do LEIA usa os dois (ver "A rotina de uma atividade do
+LEIA"), mas cada um instala e funciona sozinho.
 
-## Regra do repositório
+## Instalação numa máquina nova
 
-**Ferramenta nova nasce em `leia_tarefas/ferramentas.py`**, com docstring (vira a
-descrição nos dois modos) e tipos na assinatura (viram o JSON Schema nos dois
-modos), e entra em `CATALOGO` com emoji + linha curta. Os adaptadores não têm
-regra de negócio: se você mexeu em comportamento e não mexeu em `ferramentas.py`,
-mexeu no lugar errado.
+### Pré-requisitos
 
-Uma pegadinha do lado Hermes: o handler registrado precisa ser definido **dentro**
-de `hermes_plugin/__init__.py` (o registry do Hermes amarra a posse da tool ao
-namespace `hermes_plugins.*`). Registrar direto a função do núcleo quebra
-desabilitar/recarregar o plugin em runtime — por isso o fecho em `_handler`.
+- `uv` no PATH (macOS: `brew install uv`, ou `curl -LsSf https://astral.sh/uv/install.sh | sh`).
+- Um cliente: **Claude Code** (`claude`) ou **Hermes**.
+- Python **não** precisa estar instalado: o núcleo (`leia_tarefas/`) usa só a stdlib e o
+  `mcp_server.py` é um script PEP 723 (`requires-python >=3.10`, dependência `mcp`) — o
+  `uv run --script` baixa um Python gerenciado quando o da máquina é antigo.
 
-## Como cada modo roda
+### 1. Credencial (uma só, para os dois modos)
 
-**MCP (Claude Code)** — `~/.claude.json`:
+`~/.config/leia-tarefas-mcp/credentials.json` (`chmod 600`), ou o caminho em `$LEIA_TAREFAS_CRED`:
 
 ```json
-"leia-tarefas": {
-  "type": "stdio",
-  "command": "uv",
-  "args": ["run", "--script", "/caminho/para/leia-tarefas/mcp_server.py"],
-  "env": {}
+{
+  "baseUrl": "https://grav-lightsail.grav.digital/leia_prod",
+  "apiKey": "CHAVE_DO_AMBIENTE",
+  "token": "TOKEN_PESSOAL",
+  "userId": "ID_DO_DONO_DO_TOKEN",
+  "expiresAtMs": 1765000000000
 }
 ```
 
-**Plugin nativo do Hermes** — symlink (fonte única; nada é copiado):
+- `baseUrl`: o do servidor **GRAV**, exatamente o acima (o CRM vive na raiz; o `/clockify/api/v1` é
+  outro servidor, o `clockify_mcp`).
+- `apiKey`: chave **do ambiente** (`API_KEY` do backend, a mesma que o app usa) — não é pessoal e é
+  a mesma para todo mundo no GRAV.
+- `token`: **pessoal**, JWT de 30 dias emitido para o e-mail da pessoa. É ele que decide o "eu" das
+  ferramentas — nunca copie o de outra pessoa.
+- `userId` / `expiresAtMs`: dono do token e prazo; o cliente usa os dois para renovar.
+
+**Emissão do token** (a primeira vez, ou depois de 30 dias parado): `scripts/mint_remoto.mjs` roda
+**dentro do container do backend** (`leia-app`) na máquina do LEIA, procura o usuário pelo e-mail no
+Mongo e grava o arquivo de credencial — nada de segredo passa pelo terminal. O `scripts/remint.sh`
+faz o caminho completo por ssh (host e chave no próprio script) e pega o e-mail do login do Claude
+Code (`~/.claude.json`); para emitir para outra pessoa, rode o `mint_remoto.mjs` com o e-mail dela.
+**Renovação normal é automática**: o cliente renova sozinho quando faltam menos de 5 dias
+(`POST /mcp/token`), então só se mexe nisso quando o token já venceu.
+
+### 2. Registrar no Claude Code
+
+```
+claude mcp add --scope user leia-tarefas -- uv run --script "$HOME/caminho/para/leia-tarefas/mcp_server.py"
+```
+
+- `--scope user` = todos os projetos; `--scope local` (padrão) = só no diretório onde rodou.
+- Caminho **absoluto** (o Claude sobe o servidor fora do diretório do comando).
+- Conferir: `claude mcp get leia-tarefas` → `Status: ✔ Connected`, `Type: stdio`, `Command: uv`,
+  `Args: run --script .../mcp_server.py`. Remover: `claude mcp remove leia-tarefas -s user`.
+- Equivalentemente, no `~/.claude.json` (chave global `mcpServers`):
+
+  ```json
+  "leia-tarefas": {
+    "type": "stdio",
+    "command": "uv",
+    "args": ["run", "--script", "/caminho/para/leia-tarefas/mcp_server.py"],
+    "env": {}
+  }
+  ```
+
+### 3. Registrar no Hermes (plugin nativo)
+
+Symlink, sem copiar nada (fonte única):
 
 ```bash
 ln -s ~/projects/vit/leia-tarefas/hermes_plugin ~/.hermes/plugins/leia-tarefas
 ```
 
-O `__init__.py` acha o repositório por `Path(__file__).resolve().parents[1]`
-(`resolve()` segue o symlink), então não precisa instalar nada no venv do Hermes —
-o que também sobrevive a `hermes update`. `leia-tarefas` já está em
-`plugins.enabled` do `config.yaml`. O toolset é montado quando o processo sobe:
+E `leia-tarefas` em `plugins.enabled` do `~/.hermes/config.yaml`. O `__init__.py` acha o repositório
+por `Path(__file__).resolve().parents[1]` (segue o symlink), então não se instala nada no venv do
+Hermes — isso também sobrevive a `hermes update`. O toolset é montado quando o processo sobe:
 mudança no plugin só aparece depois de reiniciar (desktop e gateway).
 
-## A rotina de uma atividade do LEIA (dois servidores)
+### 4. Conferir antes de usar
 
-A rotina completa usa **dois servidores independentes** — este (o quadro) e o `clockify_mcp`
-(o relógio):
+Em sessão nova, pedir **só leitura**: "minhas tarefas pendentes". Vem agrupado por fase, sem id.
+No repositório, `bash tests/paridade.sh` compara catálogo, plugin e MCP (exige `uv` e o venv do
+Hermes); `tests/test_smoke.py` faz leitura real do quadro.
+
+## Como usar no contexto da Leia
+
+1. **O card vem antes do trabalho.** Qualquer atividade do LEIA — código, investigação, ajuste —
+   começa achando/criando o card: `me_adicionar` (Responsável = eu), `iniciar` (coluna **Fazendo**) e,
+   no mesmo passo, o cronômetro do `clockify_mcp` com o título **completo e idêntico** do card.
+2. **"Eu" = dono do token.** Nunca escrever outra pessoa no Responsável. Escrita (mover, editar,
+   concluir) só em card atribuído a mim; as exceções de propósito são `criar_card`, `comentar` e
+   `arquivar` (e `me_adicionar`/`me_remover`, que só mexem em mim).
+3. **Mover/concluir card sem dono = dois passos:** `me_adicionar` primeiro, movimento depois.
+4. **Fases são lista fechada** (do processo no CRM, cresce sem aviso): Backlog, Refinamento, A Fazer,
+   Com Impedimento, Fazendo, Aguardando Aprovação, Aguardando publicação, Feito. **Backlog e
+   Refinamento não são fila de trabalho**; card novo nasce em **A Fazer**. "Bloqueado" = **Com
+   Impedimento** (e sai de lá com o motivo escrito em comentário).
+5. **Concluir** meu card o leva a **Aguardando Aprovação** — quem move para **Feito** é quem aprova.
+   Implementação entregue e publicada no dev vai para **Aguardando publicação** (é onde ficam os
+   testes manuais), não direto para Feito.
+6. **Título = efeito que a pessoa vê**, em linguagem de leigo, sem aspas; o nome técnico fica na
+   descrição. Sem aspas porque o título viaja como `descricao` do cronômetro.
+7. **Trecho curto de título casa com o card errado, em silêncio.** Use o **id** (24 caracteres) do
+   card que você já leu na conversa, ou 3+ palavras distintivas; id ambíguo volta com candidatos e
+   quem escolhe é o usuário.
+8. **Lista traz resumo.** O card inteiro (descrição, tipo, prioridade, cliente, checklist) é
+   `card` — a chamada mais cara do catálogo; não montar chamada HTTP na mão para ler card.
+9. **Registro ≠ estado:** checklist desmarcada não quer dizer trabalho não feito; o comentário do
+   card é o diário da execução.
+
+## Ferramentas (23)
+
+Leitura: `minhas_pendentes`, `minhas_fazendo`, `minhas_na_fase`, `sem_responsavel`, `listar`,
+`buscar`, `card`, `comentarios`. Escrita: `criar_card`, `iniciar`, `mover_fase`, `concluir`,
+`arquivar`, `checklist`, `editar_descricao`, `renomear`, `me_adicionar`, `me_remover`,
+`buscar_pessoas`, `participantes`, `comentar`, `excluir_comentario`.
+
+Regra do repositório: **ferramenta nova nasce em `leia_tarefas/ferramentas.py`**, com docstring
+(vira a descrição nos dois modos) e tipos na assinatura (viram o JSON Schema). Os adaptadores
+(`servidor_mcp.py` e `hermes_plugin/`) não têm regra de negócio.
+
+## A rotina de uma atividade do LEIA (dois servidores)
 
 1. achar/abrir o card (`card`) e virar Responsável (`me_adicionar`);
 2. mover para **Fazendo** (`iniciar`);
@@ -81,51 +144,45 @@ A rotina completa usa **dois servidores independentes** — este (o quadro) e o 
 4. no fim: comentar o que foi entregue, **parar o cronômetro pelo id** e mover o card para a fase
    que o processo pede (implementação pronta → "Aguardando publicação").
 
-Nada disso é acoplado no código: o `clockify_mcp` não conhece o CRM e este repositório não conhece o
-relógio. O elo é o TÍTULO do card repetido como `descricao` do lançamento — é assim que o relatório
-do time casa hora e card. Daí a regra: título sem aspas e sem paráfrase.
+O `clockify_mcp` não conhece o CRM e este repositório não conhece o relógio: o elo é o título do
+card repetido como `descricao` do lançamento. É assim que o relatório do time casa hora e card.
 
-## Passar o setup para outra pessoa do time
+## Layout e testes
 
-São dois artefatos e **duas credenciais por pessoa**:
-
-| Peça | O que é | Credencial (de cada um) |
-| --- | --- | --- |
-| `leia-tarefas` (este repositório) | quadro: card, fases, Responsável, comentários | `~/.config/leia-tarefas-mcp/credentials.json` |
-| `clockify_mcp` | relógio: cronômetro e horas | `~/.config/clockify-mcp/credentials.json` |
-
-- A credencial identifica a **pessoa** (o token é emitido para o e-mail dela; "eu" nas ferramentas =
-  dono do token). Nunca copiar a credencial de alguém — é hora e autoria de outra pessoa.
-- Emissão inicial do token do quadro: `scripts/remint.sh` emite para o e-mail que ele lê do login do
-  Claude Code (`~/.claude.json`); para outra pessoa, rode o `scripts/mint_remoto.mjs` com o e-mail
-  dela (exige acesso à máquina do LEIA e a chave ssh). Depois disso a renovação é automática.
-- **Não vai para repositório:** `credentials.json`, tokens, chaves de API e o `scripts/remint.sh`
-  com host/chave ssh reais (ele aponta para a máquina de produção). Repositório privado; se for
-  público, saneie ou remova esse script.
-
-## Credencial
-
-Uma só, compartilhada pelos dois modos:
-`~/.config/leia-tarefas-mcp/credentials.json` (600), com override por
-`LEIA_TAREFAS_CRED`. O cliente renova sozinho quando faltam menos de 5 dias;
-vencido (máquina parada > 30 dias), `bash scripts/remint.sh` emite de novo direto
-na máquina do LEIA, via ssh (dentro do container `leia-app`).
-
-**Um watchdog** chama isso: o cron do Hermes (`leia_tarefas_renova.sh`, segunda
-8h), que avisa no chat quando falha — silêncio dele = está tudo bem. O agendador
-do launchd (`digital.grav.leia-tarefas-renova`) foi descartado: um só, de
-propósito, para não haver dois lugares para manter (e um deles envelhecer).
-`remint.sh` tem trava (lock em `$TMPDIR`) para duas execuções sobrepostas não
-emitirem dois tokens.
-
-## Verificar
-
-```bash
-bash tests/paridade.sh          # exige uv e o venv do Hermes
+```
+mcp_server.py                 entry point do modo MCP (uv run --script; PEP 723)
+leia_tarefas/
+  crm.py                      cliente HTTP do CRM + regras do quadro (só stdlib)
+  ferramentas.py              catálogo NEUTRO das 23 ferramentas — regra de negócio mora aqui
+  servidor_mcp.py             adaptador fino: catálogo -> ferramentas MCP (FastMCP)
+hermes_plugin/                adaptador fino: catálogo -> tools do registry do Hermes
+scripts/remint.sh             reemite o token (ssh até a máquina do LEIA), com trava
+scripts/mint_remoto.mjs       emissor que roda no container do backend (Mongo + JWT)
+scripts/renova.sh             watchdog do token (silencioso quando está tudo bem)
+tests/paridade.sh             compara os três conjuntos (catálogo, plugin, MCP)
 ```
 
-Compara os três conjuntos (catálogo, plugin, MCP). Leitura real do quadro:
+Uma pegadinha do lado Hermes: o handler registrado precisa ser definido **dentro** de
+`hermes_plugin/__init__.py` (o registry amarra a posse da tool ao namespace `hermes_plugins.*`);
+registrar direto a função do núcleo quebra desabilitar/recarregar o plugin em runtime.
 
-```bash
-"$HOME/.hermes/hermes-agent/venv/bin/python" tests/test_smoke.py
-```
+## Credencial e renovação
+
+O token vive em `~/.config/leia-tarefas-mcp/credentials.json` (600), o **mesmo arquivo para o chat e
+para o Claude**. Renova sozinho quando faltam menos de 5 dias. Vencido (máquina > 30 dias parada),
+`bash scripts/remint.sh` emite de novo via ssh.
+
+**Um** watchdog chama isso: o cron do Hermes (`leia_tarefas_renova.sh`, segunda 8h), que avisa no
+chat quando falha — silêncio dele = está tudo bem. O agendador do launchd foi descartado de
+propósito: um só, para não haver dois lugares para manter (e um deles envelhecer).
+
+## Passar para outra pessoa
+
+Vai no repositório: o código, os testes e este README. **Não** vai: `credentials.json`, `token`,
+`apiKey` do ambiente, chave ssh e o valor que o `mint_remoto.mjs` assinaria — o script lê a `API_KEY`
+do `.env` do backend, e o `remint.sh` guarda host e caminho de chave da máquina do LEIA. Repositório
+**privado**.
+
+Cada pessoa precisa de: acesso ao repo, a `apiKey` do ambiente (mesma para todos) e o **próprio**
+token, emitido para o e-mail dela com o `mint_remoto.mjs` (alguém com acesso à máquina do LEIA roda;
+depois disso a renovação é automática).
