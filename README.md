@@ -200,11 +200,28 @@ As ferramentas vêm do plugin/MCP; o **comportamento** que as usa bem mora em um
 aqui em [`.claude/skills/tarefas-leia/SKILL.md`](.claude/skills/tarefas-leia/SKILL.md): fases e o que
 cada uma significa, card novo em A Fazer (a API põe Backlog quando a fase não é informada),
 Responsável = `ownerId`, escrita só em card atribuído a mim, começo = Fazendo + cronômetro, término =
-Aguardando publicação, PATCH e nunca PUT, o relato de quem abriu fica. Instale no agente para o
-comportamento ser o mesmo da equipe:
+Aguardando publicação, PATCH e nunca PUT, o relato de quem abriu fica.
+
+### O que fazer com cada arquivo
+
+| Arquivo | O que fazer |
+| --- | --- |
+| `mcp_server.py` | servidor MCP: registrar no Claude Code (passo 2). |
+| `hermes_plugin/` | plugin nativo: symlink em `~/.hermes/plugins/` + `plugins.enabled` (passo 3). |
+| `.claude/skills/tarefas-leia/SKILL.md` | regras de comportamento: ligar no agente por **symlink** (abaixo). |
+| `leia_tarefas/` | núcleo do quadro. Não se instala: o `mcp_server.py` e o plugin resolvem o caminho sozinhos. |
+| `scripts/` | emissão/renovação do token (`remint.sh`, `renova.sh`, `mint_remoto.mjs`) — sob demanda, bash (WSL/Git Bash no Windows). |
+| `tests/` | paridade (catálogo × plugin × MCP) e smoke; rodar quando mexer no catálogo. |
+| `.gitignore` | credenciais, `__pycache__` e afins. |
+
+### Instalar a skill
+
+O Claude Code lê `.claude/skills/` **do projeto em que a sessão está rodando** — isso não serve para
+trabalhar em outro repositório. Por isso a instalação é global, e por symlink (não cópia: `git pull`
+atualiza a regra de todo mundo, sem reinstalar).
 
 ```bash
-# Claude Code (skill global, vale em qualquer projeto)
+# Claude Code (global, vale em qualquer projeto)
 ln -s /caminho/absoluto/leia-tarefas/.claude/skills/tarefas-leia ~/.claude/skills/tarefas-leia
 
 # Hermes
@@ -217,8 +234,12 @@ mklink /J "%USERPROFILE%\.claude\skills\tarefas-leia" "C:\caminho\leia-tarefas\.
 mklink /J "%USERPROFILE%\.hermes\skills\tarefas-leia" "C:\caminho\leia-tarefas\.claude\skills\tarefas-leia"
 ```
 
-Ao atualizar a skill no repositório, o agente de todo mundo passa a ler a mesma regra (symlink, não
-cópia).
+Se o cliente não suportar skills (outro agente), aponte o arquivo para ele — o conteúdo é markdown
+puro e pode ir para um `AGENTS.md`/instrução do projeto.
+
+**Conferir que carregou:** sessão nova, pedir "minhas tarefas pendentes". A resposta vem agrupada por
+fase, **sem id**; e ao começar algo o agente deve mover o card para **Fazendo** e ligar o cronômetro
+com o título exato — se ele iniciar sem card, a skill não foi lida.
 
 ## Passar para outra pessoa
 
