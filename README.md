@@ -194,6 +194,32 @@ rode em WSL ou Git Bash.
 chat quando falha — silêncio dele = está tudo bem. O agendador do launchd (macOS) foi descartado de
 propósito: um só, para não haver dois lugares para manter (e um deles envelhecer).
 
+## Regras do agente (o comportamento do time, versionado)
+
+As ferramentas vêm do plugin/MCP; o **comportamento** que as usa bem mora em uma skill, versionada
+aqui em [`.claude/skills/tarefas-leia/SKILL.md`](.claude/skills/tarefas-leia/SKILL.md): fases e o que
+cada uma significa, card novo em A Fazer (a API põe Backlog quando a fase não é informada),
+Responsável = `ownerId`, escrita só em card atribuído a mim, começo = Fazendo + cronômetro, término =
+Aguardando publicação, PATCH e nunca PUT, o relato de quem abriu fica. Instale no agente para o
+comportamento ser o mesmo da equipe:
+
+```bash
+# Claude Code (skill global, vale em qualquer projeto)
+ln -s /caminho/absoluto/leia-tarefas/.claude/skills/tarefas-leia ~/.claude/skills/tarefas-leia
+
+# Hermes
+ln -s /caminho/absoluto/leia-tarefas/.claude/skills/tarefas-leia ~/.hermes/skills/tarefas-leia
+```
+
+```bat
+:: Windows (cmd) — junção no lugar do symlink
+mklink /J "%USERPROFILE%\.claude\skills\tarefas-leia" "C:\caminho\leia-tarefas\.claude\skills\tarefas-leia"
+mklink /J "%USERPROFILE%\.hermes\skills\tarefas-leia" "C:\caminho\leia-tarefas\.claude\skills\tarefas-leia"
+```
+
+Ao atualizar a skill no repositório, o agente de todo mundo passa a ler a mesma regra (symlink, não
+cópia).
+
 ## Passar para outra pessoa
 
 Vai no repositório: o código, os testes e este README. **Não** vai: `credentials.json`, `token`,
