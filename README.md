@@ -22,15 +22,22 @@ LEIA"), mas cada um instala e funciona sozinho.
 
 ### Pré-requisitos
 
-- `uv` no PATH (macOS: `brew install uv`, ou `curl -LsSf https://astral.sh/uv/install.sh | sh`).
+- `uv` no PATH — instalador oficial por sistema:
+  - macOS: `brew install uv`
+  - Linux / WSL: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+  - Windows: `winget install --id=astral-sh.uv -e` (ou `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`)
 - Um cliente: **Claude Code** (`claude`) ou **Hermes**.
 - Python **não** precisa estar instalado: o núcleo (`leia_tarefas/`) usa só a stdlib e o
   `mcp_server.py` é um script PEP 723 (`requires-python >=3.10`, dependência `mcp`) — o
-  `uv run --script` baixa um Python gerenciado quando o da máquina é antigo.
+  `uv run --script` baixa um Python gerenciado quando o da máquina é antigo (macOS ainda vem 3.9,
+  várias distros Linux vêm 3.8/3.9).
 
 ### 1. Credencial (uma só, para os dois modos)
 
-`~/.config/leia-tarefas-mcp/credentials.json` (`chmod 600`), ou o caminho em `$LEIA_TAREFAS_CRED`:
+`~/.config/leia-tarefas-mcp/credentials.json` — o `~` vale nos três sistemas (no Windows é
+`C:\Users\<você>`, então o arquivo fica em `C:\Users\<você>\.config\leia-tarefas-mcp\credentials.json`;
+restrinja a leitura ao seu usuário com `chmod 600` no macOS/Linux). Ou o caminho em
+`$LEIA_TAREFAS_CRED` / `%LEIA_TAREFAS_CRED%`:
 
 ```json
 {
@@ -61,11 +68,13 @@ Code (`~/.claude.json`); para emitir para outra pessoa, rode o `mint_remoto.mjs`
 ### 2. Registrar no Claude Code
 
 ```
-claude mcp add --scope user leia-tarefas -- uv run --script "$HOME/caminho/para/leia-tarefas/mcp_server.py"
+claude mcp add --scope user leia-tarefas -- uv run --script /caminho/absoluto/leia-tarefas/mcp_server.py
 ```
 
 - `--scope user` = todos os projetos; `--scope local` (padrão) = só no diretório onde rodou.
-- Caminho **absoluto** (o Claude sobe o servidor fora do diretório do comando).
+- Caminho **absoluto** (o Claude sobe o servidor fora do diretório do comando): macOS/Linux
+  `/Users/voce/leia-tarefas/mcp_server.py`; Windows `C:\Users\voce\leia-tarefas\mcp_server.py` (entre
+  aspas se houver espaço).
 - Conferir: `claude mcp get leia-tarefas` → `Status: ✔ Connected`, `Type: stdio`, `Command: uv`,
   `Args: run --script .../mcp_server.py`. Remover: `claude mcp remove leia-tarefas -s user`.
 - Equivalentemente, no `~/.claude.json` (chave global `mcpServers`):
@@ -81,22 +90,30 @@ claude mcp add --scope user leia-tarefas -- uv run --script "$HOME/caminho/para/
 
 ### 3. Registrar no Hermes (plugin nativo)
 
-Symlink, sem copiar nada (fonte única):
+Symlink (ou junção, no Windows), sem copiar nada — fonte única:
 
 ```bash
+# macOS / Linux
 ln -s ~/projects/vit/leia-tarefas/hermes_plugin ~/.hermes/plugins/leia-tarefas
 ```
 
-E `leia-tarefas` em `plugins.enabled` do `~/.hermes/config.yaml`. O `__init__.py` acha o repositório
-por `Path(__file__).resolve().parents[1]` (segue o symlink), então não se instala nada no venv do
-Hermes — isso também sobrevive a `hermes update`. O toolset é montado quando o processo sobe:
+```bat
+:: Windows (cmd) — junção não exige modo de desenvolvedor nem admin
+mklink /J "%USERPROFILE%\.hermes\plugins\leia-tarefas" "C:\caminho\leia-tarefas\hermes_plugin"
+```
+
+E `leia-tarefas` em `plugins.enabled` do `~/.hermes/config.yaml` (no Windows, o mesmo arquivo dentro
+do seu perfil). O `__init__.py` acha o repositório
+por `Path(__file__).resolve().parents[1]` (segue o symlink/junção), então não se instala nada no venv
+do Hermes — isso também sobrevive a `hermes update`. O toolset é montado quando o processo sobe:
 mudança no plugin só aparece depois de reiniciar (desktop e gateway).
 
 ### 4. Conferir antes de usar
 
 Em sessão nova, pedir **só leitura**: "minhas tarefas pendentes". Vem agrupado por fase, sem id.
 No repositório, `bash tests/paridade.sh` compara catálogo, plugin e MCP (exige `uv` e o venv do
-Hermes); `tests/test_smoke.py` faz leitura real do quadro.
+Hermes); `tests/test_smoke.py` faz leitura real do quadro. Os scripts do repo são **bash**: no
+Windows, rode em WSL ou Git Bash.
 
 ## Como usar no contexto da Leia
 
@@ -168,12 +185,13 @@ registrar direto a função do núcleo quebra desabilitar/recarregar o plugin em
 
 ## Credencial e renovação
 
-O token vive em `~/.config/leia-tarefas-mcp/credentials.json` (600), o **mesmo arquivo para o chat e
-para o Claude**. Renova sozinho quando faltam menos de 5 dias. Vencido (máquina > 30 dias parada),
-`bash scripts/remint.sh` emite de novo via ssh.
+O token vive em `~/.config/leia-tarefas-mcp/credentials.json` (600; no Windows, sob o seu perfil), o
+**mesmo arquivo para o chat e para o Claude**. Renova sozinho quando faltam menos de 5 dias. Vencido
+(máquina > 30 dias parada), `bash scripts/remint.sh` emite de novo via ssh — é bash, então no Windows
+rode em WSL ou Git Bash.
 
 **Um** watchdog chama isso: o cron do Hermes (`leia_tarefas_renova.sh`, segunda 8h), que avisa no
-chat quando falha — silêncio dele = está tudo bem. O agendador do launchd foi descartado de
+chat quando falha — silêncio dele = está tudo bem. O agendador do launchd (macOS) foi descartado de
 propósito: um só, para não haver dois lugares para manter (e um deles envelhecer).
 
 ## Passar para outra pessoa
