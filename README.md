@@ -52,7 +52,7 @@ desabilitar/recarregar o plugin em runtime — por isso o fecho em `_handler`.
 "leia-tarefas": {
   "type": "stdio",
   "command": "uv",
-  "args": ["run", "--script", "/Users/vini/projects/vit/leia-tarefas/mcp_server.py"],
+  "args": ["run", "--script", "/caminho/para/leia-tarefas/mcp_server.py"],
   "env": {}
 }
 ```
@@ -68,6 +68,40 @@ O `__init__.py` acha o repositório por `Path(__file__).resolve().parents[1]`
 o que também sobrevive a `hermes update`. `leia-tarefas` já está em
 `plugins.enabled` do `config.yaml`. O toolset é montado quando o processo sobe:
 mudança no plugin só aparece depois de reiniciar (desktop e gateway).
+
+## A rotina de uma atividade do LEIA (dois servidores)
+
+A rotina completa usa **dois servidores independentes** — este (o quadro) e o `clockify_mcp`
+(o relógio):
+
+1. achar/abrir o card (`card`) e virar Responsável (`me_adicionar`);
+2. mover para **Fazendo** (`iniciar`);
+3. ligar o cronômetro com o título **completo e idêntico** do card
+   (`iniciar_cronometro_paralelo` no servidor da Leia, que aceita vários timers ao mesmo tempo);
+4. no fim: comentar o que foi entregue, **parar o cronômetro pelo id** e mover o card para a fase
+   que o processo pede (implementação pronta → "Aguardando publicação").
+
+Nada disso é acoplado no código: o `clockify_mcp` não conhece o CRM e este repositório não conhece o
+relógio. O elo é o TÍTULO do card repetido como `descricao` do lançamento — é assim que o relatório
+do time casa hora e card. Daí a regra: título sem aspas e sem paráfrase.
+
+## Passar o setup para outra pessoa do time
+
+São dois artefatos e **duas credenciais por pessoa**:
+
+| Peça | O que é | Credencial (de cada um) |
+| --- | --- | --- |
+| `leia-tarefas` (este repositório) | quadro: card, fases, Responsável, comentários | `~/.config/leia-tarefas-mcp/credentials.json` |
+| `clockify_mcp` | relógio: cronômetro e horas | `~/.config/clockify-mcp/credentials.json` |
+
+- A credencial identifica a **pessoa** (o token é emitido para o e-mail dela; "eu" nas ferramentas =
+  dono do token). Nunca copiar a credencial de alguém — é hora e autoria de outra pessoa.
+- Emissão inicial do token do quadro: `scripts/remint.sh` emite para o e-mail que ele lê do login do
+  Claude Code (`~/.claude.json`); para outra pessoa, rode o `scripts/mint_remoto.mjs` com o e-mail
+  dela (exige acesso à máquina do LEIA e a chave ssh). Depois disso a renovação é automática.
+- **Não vai para repositório:** `credentials.json`, tokens, chaves de API e o `scripts/remint.sh`
+  com host/chave ssh reais (ele aponta para a máquina de produção). Repositório privado; se for
+  público, saneie ou remova esse script.
 
 ## Credencial
 
